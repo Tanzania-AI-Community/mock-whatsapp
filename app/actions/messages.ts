@@ -4,9 +4,11 @@ import { mockMessages } from "@/data/mockMessages"
 import { db } from "@/db"
 
 import { type Message } from "@/types/chat"
+import { filterMessagesByRole } from "@/lib/utils"
 
 /**
  * Server action to fetch messages directly from the database
+ * Can be called from both server and client components
  */
 export async function getMessages(limit: number = 100): Promise<Message[]> {
   try {
@@ -48,7 +50,7 @@ export async function getMessages(limit: number = 100): Promise<Message[]> {
         content: msg.content ?? "",
         created_at: msg.created_at,
         timestamp: timestamp,
-        status: "sent", // or any default status you prefer
+        status: "sent",
       }
     })
 
