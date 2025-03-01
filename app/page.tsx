@@ -1,9 +1,11 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import { mockMessages } from "@/data/mockMessages"
 import { Loader2, MoreVertical, RefreshCw } from "lucide-react"
 
 import type { Message } from "@/types/chat"
+import { deduplicateMessages } from "@/lib/utils"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,134 +15,179 @@ import {
 import { ChatContainer } from "@/components/ChatContainer"
 import { ChatInput } from "@/components/ChatInput"
 
-// Mock messages for demonstration
-const mockMessages: Message[] = [
-  {
-    id: "1",
-    role: "user",
-    content: "Hey! 👋",
-    timestamp: Math.floor((Date.now() - 7200000) / 1000),
-  },
-  {
-    id: "2",
-    role: "assistant",
-    content: "Hello! How can I assist you today?",
-    timestamp: Math.floor((Date.now() - 7100000) / 1000),
-  },
-  {
-    id: "3",
-    role: "user",
-    content: "I need help with my recent order",
-    timestamp: Math.floor((Date.now() - 7000000) / 1000),
-  },
-  {
-    id: "4",
-    role: "assistant",
-    content: "Of course! Could you please provide your order number?",
-    timestamp: Math.floor((Date.now() - 6900000) / 1000),
-  },
-  {
-    id: "5",
-    role: "user",
-    content: "Sure, it's #ORD-12345",
-    timestamp: Math.floor((Date.now() - 6800000) / 1000),
-  },
-  {
-    id: "6",
-    role: "assistant",
-    content:
-      "Thank you! I can see your order. It looks like it's currently in transit and will be delivered tomorrow between 2-4 PM.",
-    timestamp: Math.floor((Date.now() - 6700000) / 1000),
-  },
-  {
-    id: "7",
-    role: "user",
-    content: "That's perfect! Could you also confirm the delivery address?",
-    timestamp: Math.floor((Date.now() - 6600000) / 1000),
-  },
-  {
-    id: "8",
-    role: "assistant",
-    content:
-      "Of course! The delivery address is: 123 Main Street, Apt 4B, New York, NY 10001. Is this correct?",
-    timestamp: Math.floor((Date.now() - 6500000) / 1000),
-  },
-  {
-    id: "9",
-    role: "user",
-    content: "Yes, that's correct! Thank you so much for your help 😊",
-    timestamp: Math.floor((Date.now() - 6400000) / 1000),
-  },
-  {
-    id: "10",
-    role: "assistant",
-    content: "You're welcome! Is there anything else you need help with?",
-    timestamp: Math.floor((Date.now() - 6300000) / 1000),
-  },
-  {
-    id: "11",
-    role: "user",
-    content: "No, that's all for now. Have a great day!",
-    timestamp: Math.floor((Date.now() - 6200000) / 1000),
-  },
-  {
-    id: "12",
-    role: "assistant",
-    content:
-      "You too! Don't hesitate to reach out if you need anything else. 👋",
-    timestamp: Math.floor((Date.now() - 6100000) / 1000),
-  },
-]
+import { getMessages } from "./actions/messages"
+import { sendWhatsAppMessage } from "./actions/whatsapp"
 
 const Index = () => {
   const [messages, setMessages] = useState<Message[]>([])
-  const [isLoading, setIsLoading] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [useDB, setUseDB] = useState(true)
+  const [dbError, setDbError] = useState<string | null>(null)
+  const [tempMessages, setTempMessages] = useState<Message[]>([])
+  const [sendingMessage, setSendingMessage] = useState(false)
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const messageContentRef = useRef<string | null>(null) // Store the content of sending message
 
-  // Simulated fetch messages function with mock data
+  // Fetch messages using the server action
   const fetchMessages = async () => {
     try {
-      // Simulate API delay
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-      setMessages(mockMessages)
-    } catch (error) {
-      console.error("Error fetching messages:", error)
-    }
-  }
-
-  // Initial fetch on component mount
-  useEffect(() => {
-    fetchMessages()
-  }, [])
-
-  const handleRefresh = () => {
-    fetchMessages()
-  }
-
-  const handleSendMessage = async (text: string) => {
-    setIsLoading(true)
-    try {
-      // Simulate sending a message
-      const newMessage: Message = {
-        id: crypto.randomUUID(),
-        role: "user",
-        content: text,
-        timestamp: Math.floor(Date.now() / 1000),
+      if (!useDB) {
+        setMessages(mockMessages)
+        setIsLoading(false)
+        setDbError(null)
+        return
       }
 
-      // Add new message to the list
-      setMessages((prev) => [...prev, newMessage])
+      // Fetch from database using server action
+      const data = await getMessages()
 
-      // Simulate API delay
-      await new Promise((resolve) => setTimeout(resolve, 500))
+      // Check if we have any temp messages that match ones in the database
+      if (tempMessages.length > 0) {
+        const remainingTempMessages = deduplicateMessages(data, tempMessages)
+        setTempMessages(remainingTempMessages)
+
+        // If the message we just sent is now in the database, stop sending state
+        if (messageContentRef.current) {
+          const sentMessageExists = data.some(
+            (dbMsg: { role: string; content: string | null }) =>
+              dbMsg.role === "user" &&
+              dbMsg.content === messageContentRef.current
+          )
+
+          if (sentMessageExists) {
+            setSendingMessage(false)
+            messageContentRef.current = null
+          }
+        }
+      }
+
+      setMessages(data)
+
+      if (data.length > 0 && data[0].id === mockMessages[0].id) {
+        setDbError("Database connection failed, using mock data")
+        setUseDB(false)
+      } else {
+        setDbError(null)
+      }
+
+      setIsLoading(false)
     } catch (error) {
-      console.error("Error sending message:", error)
-    } finally {
+      console.error("Error fetching messages:", error)
+      setUseDB(false)
+      setMessages(mockMessages)
+      setDbError(`${error}`)
       setIsLoading(false)
     }
   }
 
+  // Set up polling every 2 seconds
+  useEffect(() => {
+    fetchMessages()
+
+    const interval = sendingMessage ? 1000 : 2000
+
+    pollingIntervalRef.current = setInterval(() => {
+      fetchMessages()
+    }, interval)
+
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+      }
+    }
+  }, [useDB, sendingMessage])
+
+  const handleRefresh = () => {
+    setIsLoading(true)
+    fetchMessages()
+  }
+
+  const handleClearChat = () => {
+    setMessages([])
+    setTempMessages([])
+    messageContentRef.current = null
+  }
+
+  const handleToggleDataSource = () => {
+    setUseDB(!useDB)
+  }
+
+  const handleSendMessage = async (text: string) => {
+    if (sendingMessage) return // Prevent sending multiple messages at once
+
+    // Store the content for later comparison
+    messageContentRef.current = text
+
+    const tempMessage: Message = {
+      id: Date.now(),
+      role: "user",
+      content: text,
+      created_at: new Date(),
+      timestamp: Math.floor(Date.now() / 1000),
+      status: "sending",
+      isTemp: true,
+    }
+
+    setTempMessages((prev) => [...prev, tempMessage])
+    setSendingMessage(true)
+
+    try {
+      const result = await sendWhatsAppMessage({ body: text })
+
+      if (!result.success) {
+        throw new Error("Failed to send message to WhatsApp API")
+      }
+
+      // Immediately fetch latest messages to check if our message was saved
+      await fetchMessages()
+
+      // Set temp message to "sent" state while we wait to see if it appears in DB
+      setTempMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === tempMessage.id ? { ...msg, status: "sent" } : msg
+        )
+      )
+
+      // After a maximum of 10 seconds, clear the temporary message regardless
+      // This is a failsafe in case the message never appears in the database
+      setTimeout(() => {
+        setTempMessages((prev) =>
+          prev.filter((msg) => msg.id !== tempMessage.id)
+        )
+        if (messageContentRef.current === text) {
+          messageContentRef.current = null
+        }
+        setSendingMessage(false)
+      }, 10000)
+    } catch (error) {
+      console.error("Error sending message:", error)
+
+      // Update temp message status to error
+      setTempMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === tempMessage.id ? { ...msg, status: "error" } : msg
+        )
+      )
+
+      // Keep error message visible for 5 seconds, then remove it
+      setTimeout(() => {
+        setTempMessages((prev) =>
+          prev.filter((msg) => msg.id !== tempMessage.id)
+        )
+        if (messageContentRef.current === text) {
+          messageContentRef.current = null
+        }
+        setSendingMessage(false)
+      }, 5000)
+    }
+  }
+
+  // Combine real and temporary messages for display
+  const combinedMessages = [...messages, ...tempMessages]
+
   return (
-    <div className="mx-auto flex h-screen max-w-2xl flex-col">
+    <div className="mx-auto flex h-screen min-w-[350px] max-w-2xl flex-col rounded-lg bg-primary-foreground shadow-lg">
+      {/* Header section */}
       <div className="flex items-center justify-between bg-primary px-4 py-3">
         <div className="flex items-center space-x-3">
           <div className="flex size-10 items-center justify-center rounded-full bg-muted">
@@ -161,25 +208,41 @@ const Index = () => {
               <RefreshCw className="mr-2 size-4" />
               Refresh
             </DropdownMenuItem>
-            <DropdownMenuItem>Clear chat</DropdownMenuItem>
-            <DropdownMenuItem>Settings</DropdownMenuItem>
+            <DropdownMenuItem onClick={handleClearChat}>
+              Clear chat
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleToggleDataSource}>
+              {useDB ? "Use Mock Data" : "Use Database"}
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-hidden">
-        {messages.length === 0 ? (
+      {/* Chat area */}
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        {isLoading && messages.length === 0 && tempMessages.length === 0 ? (
           <div className="flex h-full items-center justify-center text-muted-foreground">
             <Loader2 className="mr-2 size-6 animate-spin" />
             Loading messages...
           </div>
         ) : (
-          <ChatContainer messages={messages} />
+          <>
+            <ChatContainer messages={combinedMessages} />
+            {(!useDB || dbError) && (
+              <div className="absolute bottom-4 right-4 rounded bg-yellow-100 px-3 py-1 text-xs text-yellow-800">
+                {dbError || "Using mock data"}
+              </div>
+            )}
+          </>
         )}
       </div>
 
+      {/* Input area */}
       <div className="p-4">
-        <ChatInput onSendMessage={handleSendMessage} isLoading={isLoading} />
+        <ChatInput
+          onSendMessage={handleSendMessage}
+          isLoading={sendingMessage}
+        />
       </div>
     </div>
   )
