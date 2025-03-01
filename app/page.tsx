@@ -26,10 +26,6 @@ export default async function Home() {
         </div>
       }
     >
-      {/* 
-        Pass the pre-fetched messages to the client component.
-        The client component will handle all the interaction and real-time updates.
-      */}
       <ClientChatInterface
         initialMessages={messages}
         isInitialLoading={isError || messages.length === 0}

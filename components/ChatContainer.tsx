@@ -7,89 +7,161 @@ import { cn } from "@/lib/utils"
 
 import { ChatMessage } from "./ChatMessage"
 import { Button } from "./ui/button"
-import { ScrollArea } from "./ui/scroll-area"
 
 interface ChatContainerProps {
   messages: Message[]
+  shouldScrollToBottom?: boolean
+  onScrollComplete?: () => void
 }
 
-export const ChatContainer = ({ messages }: ChatContainerProps) => {
-  const bottomRef = useRef<HTMLDivElement>(null)
-  const scrollAreaRef = useRef<HTMLDivElement>(null)
+export const ChatContainer = ({
+  messages,
+  shouldScrollToBottom = false,
+  onScrollComplete,
+}: ChatContainerProps) => {
+  const messagesEndRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  const prevMessagesLengthRef = useRef(messages.length)
-  const isInitialLoadRef = useRef(true)
-
-  // Track if user is at bottom and if scroll button should be shown
-  const [atBottom, setAtBottom] = useState(true)
   const [showScrollButton, setShowScrollButton] = useState(false)
+  const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true)
+  const prevMessagesLengthRef = useRef(messages.length)
 
-  // Function to determine if element is at the bottom
-  const isAtBottom = () => {
-    if (!containerRef.current) return true
-
-    const container = containerRef.current
-    // Consider small threshold to account for minor discrepancies
-    const threshold = 80
-    const atBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight <=
-      threshold
-
-    return atBottom
-  }
-
-  // Handle scrolling
-  const handleScroll = () => {
+  // Improved scroll-to-bottom utility
+  const scrollToBottom = (smooth: boolean = true) => {
     if (containerRef.current) {
-      const isBottomVisible = isAtBottom()
-      setAtBottom(isBottomVisible)
-      setShowScrollButton(!isBottomVisible)
+      const container = containerRef.current
+
+      // For smoother scroll, use a small delay to ensure DOM is fully updated
+      setTimeout(() => {
+        try {
+          // First attempt: direct DOM manipulation for reliable scrolling
+          container.scrollTop = container.scrollHeight
+
+          // Then use smooth scrolling for animation if requested
+          if (smooth) {
+            container.scrollTo({
+              top: container.scrollHeight,
+              behavior: "smooth",
+            })
+          }
+
+          // Alternative method using the messages end ref as backup
+          if (messagesEndRef.current) {
+            messagesEndRef.current.scrollIntoView({
+              behavior: smooth ? "smooth" : "auto",
+              block: "end",
+            })
+          }
+
+          // After scrolling, mark that we don't need the button
+          setShowScrollButton(false)
+
+          // Update auto-scroll state
+          setIsAutoScrollEnabled(true)
+
+          // If using smooth scroll, wait for animation to complete before notifying parent
+          if (smooth && onScrollComplete) {
+            setTimeout(onScrollComplete, 300) // approximate duration of smooth scroll
+          } else if (onScrollComplete) {
+            onScrollComplete()
+          }
+        } catch (e) {
+          console.error("Error scrolling to bottom:", e)
+          // Fallback: direct scroll assignment
+          container.scrollTop = container.scrollHeight
+        }
+      }, 50)
     }
   }
 
-  // Add scroll event listener
+  // More accurate scroll position detection
+  const handleScroll = () => {
+    if (!containerRef.current) return
+
+    const container = containerRef.current
+    const { scrollTop, scrollHeight, clientHeight } = container
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+
+    // Use a very small threshold (20px) for better precision
+    const isAtBottom = distanceFromBottom <= 20
+
+    // Only update states if they've actually changed
+    if (showScrollButton === isAtBottom) {
+      setShowScrollButton(!isAtBottom)
+    }
+
+    if (isAtBottom && !isAutoScrollEnabled) {
+      setIsAutoScrollEnabled(true)
+    } else if (!isAtBottom && isAutoScrollEnabled) {
+      setIsAutoScrollEnabled(false)
+    }
+  }
+
+  // Improved scroll event listener with debounce
   useEffect(() => {
     const currentContainer = containerRef.current
-    if (currentContainer) {
-      currentContainer.addEventListener("scroll", handleScroll)
-      return () => {
-        currentContainer.removeEventListener("scroll", handleScroll)
+    if (!currentContainer) return
+
+    let scrollTimeout: NodeJS.Timeout | null = null
+
+    const handleScrollDebounced = () => {
+      if (scrollTimeout) {
+        clearTimeout(scrollTimeout)
       }
+
+      // Use a short debounce to avoid excessive checks
+      scrollTimeout = setTimeout(() => {
+        handleScroll()
+      }, 100)
+    }
+
+    currentContainer.addEventListener("scroll", handleScrollDebounced, {
+      passive: true,
+    })
+
+    return () => {
+      if (scrollTimeout) {
+        clearTimeout(scrollTimeout)
+      }
+      currentContainer.removeEventListener("scroll", handleScrollDebounced)
     }
   }, [])
 
-  // Scroll to bottom function
-  const scrollToBottom = () => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }
-
-  // Scroll to bottom on initial load or when new messages arrive
+  // Check for new messages and scroll accordingly
   useEffect(() => {
     const hasNewMessages = messages.length > prevMessagesLengthRef.current
 
-    // Automatically scroll down if:
-    // 1. It's the initial load
-    // 2. There are new messages AND user was already at the bottom
-    const shouldScrollToBottom =
-      isInitialLoadRef.current || (hasNewMessages && atBottom)
-
-    if (shouldScrollToBottom) {
-      // Short delay to ensure DOM is updated
-      const scrollTimer = setTimeout(() => {
-        scrollToBottom()
-      }, 100)
-
-      isInitialLoadRef.current = false
-      prevMessagesLengthRef.current = messages.length
-
-      return () => clearTimeout(scrollTimer)
-    } else if (hasNewMessages) {
-      // If new messages arrived but user was scrolled up
-      // Update reference but don't scroll (and ensure scroll button is visible)
-      prevMessagesLengthRef.current = messages.length
+    // Always scroll on initial load or when explicitly requested
+    if (shouldScrollToBottom || messages.length === 0) {
+      // Short delay to ensure component is fully rendered
+      setTimeout(() => scrollToBottom(true), 100)
+    }
+    // Scroll if new messages arrived and auto-scroll is enabled
+    else if (hasNewMessages && isAutoScrollEnabled) {
+      scrollToBottom(true)
+    }
+    // If new messages but not scrolling, show button
+    else if (hasNewMessages) {
       setShowScrollButton(true)
     }
-  }, [messages, atBottom])
+
+    // Update the ref regardless
+    prevMessagesLengthRef.current = messages.length
+  }, [messages, shouldScrollToBottom, isAutoScrollEnabled])
+
+  // Force a scroll position check when component mounts
+  useEffect(() => {
+    // Initial scroll to bottom
+    if (messages.length > 0) {
+      scrollToBottom(false)
+    }
+
+    // Schedule a position check after everything has rendered
+    const checkTimer = setTimeout(() => {
+      handleScroll()
+    }, 500)
+
+    return () => clearTimeout(checkTimer)
+  }, [])
 
   const getDateDivider = (timestamp: number) => {
     const date = new Date(timestamp * 1000)
@@ -103,7 +175,6 @@ export const ChatContainer = ({ messages }: ChatContainerProps) => {
   }
 
   // Sort messages by timestamp to ensure chronological order
-  // Temporary messages should always appear at the end
   const sortedMessages = [...messages].sort((a, b) => {
     // Temporary messages always at the end
     if (a.isTemp && !b.isTemp) return 1
@@ -119,46 +190,16 @@ export const ChatContainer = ({ messages }: ChatContainerProps) => {
     return timestampA - timestampB
   })
 
-  const groupMessagesByDate = () => {
-    const groups: { date: number; messages: Message[] }[] = []
-
-    sortedMessages.forEach((message) => {
-      const timestamp =
-        message.timestamp ||
-        (message.created_at
-          ? Math.floor(new Date(message.created_at).getTime() / 1000)
-          : Math.floor(Date.now() / 1000))
-
-      const lastGroup = groups[groups.length - 1]
-      const messageDate = new Date(timestamp * 1000)
-
-      if (
-        !lastGroup ||
-        !isSameDay(new Date(lastGroup.date * 1000), messageDate)
-      ) {
-        groups.push({
-          date: timestamp,
-          messages: [message],
-        })
-      } else {
-        lastGroup.messages.push(message)
-      }
-    })
-
-    return groups
-  }
-
-  const messageGroups = groupMessagesByDate()
+  const messageGroups = groupMessagesByDate(sortedMessages)
 
   return (
     <div className="relative h-full">
-      <ScrollArea
-        className="h-full bg-[#f0f2f5]"
-        scrollHideDelay={300}
+      <div
+        className="h-full overflow-y-auto scroll-smooth bg-[#f0f2f5] px-4 py-2"
         ref={containerRef}
-        onScrollCapture={handleScroll}
+        onScroll={handleScroll} // Direct scroll handler for immediate response
       >
-        <div className="flex flex-col space-y-4 p-4">
+        <div className="flex flex-col space-y-4">
           {messageGroups.map((group) => (
             <div key={group.date} className="space-y-2">
               <div className="flex justify-center self-center">
@@ -174,23 +215,55 @@ export const ChatContainer = ({ messages }: ChatContainerProps) => {
               ))}
             </div>
           ))}
-          {/* This div serves as an anchor for scrolling to the bottom */}
-          <div ref={bottomRef} className="h-1" />
+          {/* This div serves as a scroll anchor with increased height for better targeting */}
+          <div ref={messagesEndRef} className="h-4 scroll-mt-4" />
         </div>
-      </ScrollArea>
+      </div>
 
-      {/* Scroll to bottom button */}
+      {/* Scroll to bottom button with clear visibility conditions */}
       <Button
         size="icon"
         variant="secondary"
         className={cn(
-          "absolute bottom-6 right-6 h-10 w-10 rounded-full shadow-md transition-opacity duration-300",
-          showScrollButton ? "opacity-100" : "pointer-events-none opacity-0"
+          "absolute bottom-6 right-6 size-10 rounded-full shadow-md transition-all duration-200 ease-in-out",
+          showScrollButton
+            ? "translate-y-0 opacity-100"
+            : "pointer-events-none translate-y-4 opacity-0"
         )}
-        onClick={scrollToBottom}
+        onClick={() => scrollToBottom(true)}
       >
-        <ArrowDown className="h-5 w-5" />
+        <ArrowDown className="size-5" />
       </Button>
     </div>
   )
+}
+
+// Helper function to group messages by date
+function groupMessagesByDate(messages: Message[]) {
+  const groups: { date: number; messages: Message[] }[] = []
+
+  messages.forEach((message) => {
+    const timestamp =
+      message.timestamp ||
+      (message.created_at
+        ? Math.floor(new Date(message.created_at).getTime() / 1000)
+        : Math.floor(Date.now() / 1000))
+
+    const lastGroup = groups[groups.length - 1]
+    const messageDate = new Date(timestamp * 1000)
+
+    if (
+      !lastGroup ||
+      !isSameDay(new Date(lastGroup.date * 1000), messageDate)
+    ) {
+      groups.push({
+        date: timestamp,
+        messages: [message],
+      })
+    } else {
+      lastGroup.messages.push(message)
+    }
+  })
+
+  return groups
 }

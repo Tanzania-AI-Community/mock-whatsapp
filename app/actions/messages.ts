@@ -4,7 +4,6 @@ import { mockMessages } from "@/data/mockMessages"
 import { db } from "@/db"
 
 import { type Message } from "@/types/chat"
-import { filterMessagesByRole } from "@/lib/utils"
 
 /**
  * Server action to fetch messages directly from the database

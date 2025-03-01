@@ -116,6 +116,20 @@
     --sidebar-border: 240 3.7% 15.9%;
     --sidebar-ring: 217.2 91.2% 59.8%;
   }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  /* For browser compatibility */
+  body {
+    scroll-behavior: smooth;
+  }
+
+  /* For scroll containers */
+  .scroll-smooth {
+    scroll-behavior: smooth;
+  }
 }
 
 @layer base {

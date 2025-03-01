@@ -33,9 +33,12 @@ export default function ClientChatInterface({
   const [dbError, setDbError] = useState<string | null>(null)
   const [tempMessages, setTempMessages] = useState<Message[]>([])
   const [sendingMessage, setSendingMessage] = useState(false)
+  const [shouldScrollToBottom, setShouldScrollToBottom] = useState(true)
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const messageContentRef = useRef<string | null>(null)
   const isFirstRenderRef = useRef(true)
+  const prevMessagesLengthRef = useRef(initialMessages.length)
+  const [userJustSentMessage, setUserJustSentMessage] = useState(false)
 
   // Fetch messages using the server action
   const fetchMessages = async () => {
@@ -76,6 +79,20 @@ export default function ClientChatInterface({
         }
       }
 
+      // Check if there are new messages to trigger scroll
+      const hasNewMessages = data.length > prevMessagesLengthRef.current
+
+      // Always scroll to bottom if there are new messages or user just sent a message
+      if (hasNewMessages || userJustSentMessage) {
+        setShouldScrollToBottom(true)
+        // Reset the flag after handling it
+        if (userJustSentMessage) {
+          setUserJustSentMessage(false)
+        }
+      }
+
+      prevMessagesLengthRef.current = data.length
+
       setMessages(data)
 
       if (data.length > 0 && data[0].id === mockMessages[0].id) {
@@ -97,12 +114,8 @@ export default function ClientChatInterface({
 
   // Set up polling
   useEffect(() => {
-    // Only start polling after the first render
-    if (!isFirstRenderRef.current) {
-      fetchMessages()
-    } else {
-      isFirstRenderRef.current = false
-    }
+    // Initial fetch on mount or when mode changes
+    fetchMessages()
 
     const interval = sendingMessage ? 1000 : 2000
 
@@ -117,8 +130,18 @@ export default function ClientChatInterface({
     }
   }, [useDB, sendingMessage])
 
+  // When initial messages are updated from props
+  useEffect(() => {
+    if (initialMessages.length > 0 && messages.length === 0) {
+      setMessages(initialMessages)
+      prevMessagesLengthRef.current = initialMessages.length
+      setShouldScrollToBottom(true)
+    }
+  }, [initialMessages, messages.length])
+
   const handleRefresh = () => {
     setIsLoading(true)
+    setShouldScrollToBottom(true)
     fetchMessages()
   }
 
@@ -130,12 +153,19 @@ export default function ClientChatInterface({
 
   const handleToggleDataSource = () => {
     setUseDB(!useDB)
+    setShouldScrollToBottom(true)
   }
 
   const handleSendMessage = async (text: string) => {
     if (sendingMessage) return
 
     messageContentRef.current = text
+
+    // Set flag that user just sent a message to ensure scroll
+    setUserJustSentMessage(true)
+
+    // Always scroll to bottom when sending a new message
+    setShouldScrollToBottom(true)
 
     const tempMessage: Message = {
       id: Date.now(),
@@ -195,6 +225,11 @@ export default function ClientChatInterface({
     }
   }
 
+  const handleScrollComplete = () => {
+    // Reset the scroll flag after scrolling is complete
+    setShouldScrollToBottom(false)
+  }
+
   // Filter to only show user and assistant messages
   const filterAllowedRoles = (msgs: Message[]): Message[] => {
     return msgs.filter((msg) => msg.role === "user" || msg.role === "assistant")
@@ -249,7 +284,11 @@ export default function ClientChatInterface({
           </div>
         ) : (
           <>
-            <ChatContainer messages={combinedMessages} />
+            <ChatContainer
+              messages={combinedMessages}
+              shouldScrollToBottom={shouldScrollToBottom}
+              onScrollComplete={handleScrollComplete}
+            />
             {(!useDB || dbError) && (
               <div className="absolute bottom-4 left-4 rounded bg-yellow-100 px-3 py-1 text-xs text-yellow-800">
                 {dbError || "Using mock data"}
