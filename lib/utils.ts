@@ -1,7 +1,7 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 
-import { type Message } from "@/types/chat"
+import { isDisplayRole, type Message } from "@/types/chat"
 
 // Utility function for combining Tailwind CSS classes
 export function cn(...inputs: ClassValue[]) {
@@ -116,4 +116,11 @@ export function deduplicateMessages(
   })
 
   return remainingTempMessages
+}
+
+/**
+ * Filter messages to only include user and assistant roles
+ */
+export function filterMessagesByRole(messages: Message[]): Message[] {
+  return messages.filter((message) => isDisplayRole(message.role))
 }

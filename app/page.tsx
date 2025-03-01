@@ -182,8 +182,17 @@ const Index = () => {
     }
   }
 
-  // Combine real and temporary messages for display
-  const combinedMessages = [...messages, ...tempMessages]
+  // Filter to only show user and assistant messages
+  const filterAllowedRoles = (msgs: Message[]): Message[] => {
+    return msgs.filter((msg) => msg.role === "user" || msg.role === "assistant")
+  }
+
+  // Combine real and temporary messages for display, filtering out unwanted roles
+  const filteredMessages =
+    messages.length > 0 ? filterAllowedRoles(messages) : []
+  const filteredTempMessages =
+    tempMessages.length > 0 ? filterAllowedRoles(tempMessages) : []
+  const combinedMessages = [...filteredMessages, ...filteredTempMessages]
 
   return (
     <div className="mx-auto flex h-screen min-w-[350px] max-w-2xl flex-col rounded-lg bg-primary-foreground shadow-lg">
@@ -220,7 +229,7 @@ const Index = () => {
 
       {/* Chat area */}
       <div className="relative min-h-0 flex-1 overflow-hidden">
-        {isLoading && messages.length === 0 && tempMessages.length === 0 ? (
+        {isLoading && combinedMessages.length === 0 ? (
           <div className="flex h-full items-center justify-center text-muted-foreground">
             <Loader2 className="mr-2 size-6 animate-spin" />
             Loading messages...

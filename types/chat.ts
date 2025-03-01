@@ -1,5 +1,13 @@
 export type MessageRole = "user" | "assistant" | "tool" | "system"
 
+// New type for displayed message roles only
+export type DisplayMessageRole = "user" | "assistant"
+
+// Helper function to check if a role is a display role
+export function isDisplayRole(role: MessageRole): role is DisplayMessageRole {
+  return role === "user" || role === "assistant"
+}
+
 export interface Message {
   id: string | number
   user_id?: number
