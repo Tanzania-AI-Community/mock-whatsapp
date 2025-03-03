@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowDown } from "lucide-react"
 
 import { type Message } from "@/types/chat"
-import { formatDateDivider, groupMessagesByDate } from "@/lib/messageUtils"
+import { groupMessagesByDate } from "@/lib/messageUtils"
 import { cn } from "@/lib/utils"
 
 import { ChatMessage } from "./ChatMessage"
+import { DateDivider } from "./DateDivider" // Import our new component
 import { Button } from "./ui/button"
 
 interface ChatContainerProps {
@@ -26,6 +27,29 @@ export const ChatContainer = ({
   const [showScrollButton, setShowScrollButton] = useState(false)
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true)
   const prevMessagesLengthRef = useRef(messages.length)
+
+  // Memoize sorted messages
+  const sortedMessages = useMemo(() => {
+    return [...messages].sort((a, b) => {
+      // Temporary messages always at the end
+      if (a.isTemp && !b.isTemp) return 1
+      if (!a.isTemp && b.isTemp) return -1
+
+      // Otherwise sort by timestamp
+      const timestampA =
+        a.timestamp ||
+        (a.created_at ? new Date(a.created_at).getTime() / 1000 : 0)
+      const timestampB =
+        b.timestamp ||
+        (b.created_at ? new Date(b.created_at).getTime() / 1000 : 0)
+      return timestampA - timestampB
+    })
+  }, [messages])
+
+  // Memoize message groups by date
+  const messageGroups = useMemo(() => {
+    return groupMessagesByDate(sortedMessages)
+  }, [sortedMessages])
 
   // Improved scroll-to-bottom utility with useCallback
   const scrollToBottom = useCallback(
@@ -181,24 +205,6 @@ export const ChatContainer = ({
     return null
   }
 
-  // Sort messages by timestamp to ensure chronological order
-  const sortedMessages = [...messages].sort((a, b) => {
-    // Temporary messages always at the end
-    if (a.isTemp && !b.isTemp) return 1
-    if (!a.isTemp && b.isTemp) return -1
-
-    // Otherwise sort by timestamp
-    const timestampA =
-      a.timestamp ||
-      (a.created_at ? new Date(a.created_at).getTime() / 1000 : 0)
-    const timestampB =
-      b.timestamp ||
-      (b.created_at ? new Date(b.created_at).getTime() / 1000 : 0)
-    return timestampA - timestampB
-  })
-
-  const messageGroups = groupMessagesByDate(sortedMessages)
-
   return (
     <div className="relative h-full">
       <div
@@ -209,11 +215,8 @@ export const ChatContainer = ({
         <div className="flex flex-col space-y-4">
           {messageGroups.map((group) => (
             <div key={group.date} className="space-y-2">
-              <div className="flex justify-center self-center">
-                <div className="rounded-full bg-white px-4 py-1 text-sm text-muted-foreground shadow-sm">
-                  {formatDateDivider(group.date)}
-                </div>
-              </div>
+              <DateDivider timestamp={group.date} />
+
               {group.messages.map((message) => (
                 <ChatMessage
                   key={`${message.id}-${message.isTemp ? "temp" : "real"}`}

@@ -1,15 +1,26 @@
-import { useEffect, useState } from "react"
+import { memo, useEffect, useMemo, useState } from "react"
 import { format } from "date-fns"
 import { Check, CheckCheck } from "lucide-react"
 
 import { type Message } from "@/types/chat"
-import { cn } from "@/lib/utils" // Import utility for classnames
+import { cn } from "@/lib/utils"
 
 interface ChatMessageProps {
   message: Message
 }
 
-export const ChatMessage = ({ message }: ChatMessageProps) => {
+// Create a comparison function for memoization
+const areEqual = (prevProps: ChatMessageProps, nextProps: ChatMessageProps) => {
+  // Compare important properties that would affect rendering
+  return (
+    prevProps.message.id === nextProps.message.id &&
+    prevProps.message.content === nextProps.message.content &&
+    prevProps.message.status === nextProps.message.status &&
+    prevProps.message.isTemp === nextProps.message.isTemp
+  )
+}
+
+const ChatMessageComponent = ({ message }: ChatMessageProps) => {
   const isSender = message.role === "user"
   const isTemporary = message.isTemp === true
 
@@ -23,8 +34,8 @@ export const ChatMessage = ({ message }: ChatMessageProps) => {
     }
   }, [isTemporary])
 
-  // Get the timestamp from the available data
-  const getMessageTime = () => {
+  // Memoize expensive calculations
+  const messageTime = useMemo(() => {
     try {
       // Try using timestamp (seconds)
       if (message.timestamp) {
@@ -47,12 +58,10 @@ export const ChatMessage = ({ message }: ChatMessageProps) => {
       console.error("Error parsing message time:", e)
       return new Date()
     }
-  }
+  }, [message.timestamp, message.created_at])
 
-  const messageTime = getMessageTime()
-
-  // Message status indicator
-  const getStatusIcon = () => {
+  // Memoize status icon
+  const statusIcon = useMemo(() => {
     if (!isSender) return null
 
     switch (message.status) {
@@ -65,7 +74,7 @@ export const ChatMessage = ({ message }: ChatMessageProps) => {
       default:
         return <Check className="size-4 text-muted-foreground" />
     }
-  }
+  }, [isSender, message.status])
 
   return (
     <div
@@ -73,7 +82,7 @@ export const ChatMessage = ({ message }: ChatMessageProps) => {
       className={cn(
         `message-appear flex flex-col space-y-1 ${isSender ? "items-end" : "items-start"}`,
         isTemporary && "animate-pulse",
-        { "opacity-70": isTemporary } // Lower opacity for temporary messages
+        { "opacity-70": isTemporary }
       )}
       style={{ transition: "opacity 0.3s ease-in-out" }}
     >
@@ -94,10 +103,13 @@ export const ChatMessage = ({ message }: ChatMessageProps) => {
             <span className="text-xs text-muted-foreground">
               {format(messageTime, "HH:mm")}
             </span>
-            {isSender && getStatusIcon()}
+            {statusIcon}
           </div>
         </div>
       </div>
     </div>
   )
 }
+
+// Export the memoized component
+export const ChatMessage = memo(ChatMessageComponent, areEqual)

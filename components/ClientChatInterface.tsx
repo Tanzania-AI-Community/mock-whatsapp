@@ -154,6 +154,7 @@ export default function ClientChatInterface({
         pollingIntervalRef.current = null
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sendingMessage, isPollingSuspended])
 
   // When initial messages are updated from props
