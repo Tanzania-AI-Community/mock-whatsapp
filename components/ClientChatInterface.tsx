@@ -1,11 +1,19 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { mockMessages } from "@/data/mockMessages"
-import { Loader2, MoreVertical, RefreshCw } from "lucide-react"
+import {
+  AlertCircle,
+  Database,
+  Loader2,
+  MessageSquare,
+  MoreVertical,
+  RefreshCw,
+} from "lucide-react"
 
 import type { Message } from "@/types/chat"
+import { shouldTriggerScroll } from "@/lib/messageUtils"
 import { deduplicateMessages } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,106 +37,124 @@ export default function ClientChatInterface({
   // Use initialMessages as the starting point for our state
   const [messages, setMessages] = useState<Message[]>(initialMessages)
   const [isLoading, setIsLoading] = useState(isInitialLoading)
-  const [useDB, setUseDB] = useState(true)
   const [dbError, setDbError] = useState<string | null>(null)
+  const [connectionFailed, setConnectionFailed] = useState(false)
   const [tempMessages, setTempMessages] = useState<Message[]>([])
   const [sendingMessage, setSendingMessage] = useState(false)
   const [shouldScrollToBottom, setShouldScrollToBottom] = useState(true)
+  const [isPollingSuspended, setIsPollingSuspended] = useState(false)
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const messageContentRef = useRef<string | null>(null)
-  const isFirstRenderRef = useRef(true)
   const prevMessagesLengthRef = useRef(initialMessages.length)
   const [userJustSentMessage, setUserJustSentMessage] = useState(false)
+  const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true) // Add this state
 
   // Fetch messages using the server action
   const fetchMessages = async () => {
+    if (isPollingSuspended) return
+
     try {
-      if (!useDB) {
-        setMessages(mockMessages)
-        setIsLoading(false)
-        setDbError(null)
-        return
-      }
-
-      // Skip fetching on first render since we already have initialMessages
-      if (isFirstRenderRef.current && initialMessages.length > 0) {
-        isFirstRenderRef.current = false
-        setIsLoading(false)
-        return
-      }
-
-      const data = await getMessages()
-
-      // Check if we have any temp messages that match ones in the database
-      if (tempMessages.length > 0) {
-        const remainingTempMessages = deduplicateMessages(data, tempMessages)
-        setTempMessages(remainingTempMessages)
-
-        // If the message we just sent is now in the database, stop sending state
-        if (messageContentRef.current) {
-          const sentMessageExists = data.some(
-            (dbMsg) =>
-              dbMsg.role === "user" &&
-              dbMsg.content === messageContentRef.current
-          )
-
-          if (sentMessageExists) {
-            setSendingMessage(false)
-            messageContentRef.current = null
-          }
-        }
-      }
-
-      // Check if there are new messages to trigger scroll
-      const hasNewMessages = data.length > prevMessagesLengthRef.current
-
-      // Always scroll to bottom if there are new messages or user just sent a message
-      if (hasNewMessages || userJustSentMessage) {
-        setShouldScrollToBottom(true)
-        // Reset the flag after handling it
-        if (userJustSentMessage) {
-          setUserJustSentMessage(false)
-        }
-      }
-
-      prevMessagesLengthRef.current = data.length
-
-      setMessages(data)
-
-      if (data.length > 0 && data[0].id === mockMessages[0].id) {
-        setDbError("Database connection failed, using mock data")
-        setUseDB(false)
-      } else {
-        setDbError(null)
-      }
-
+      setIsLoading(true)
+      const response = await getMessages()
       setIsLoading(false)
+
+      if (response.error) {
+        handleDatabaseError(response.error)
+        return
+      }
+
+      if (response.messages) {
+        handleNewMessages(response.messages)
+      }
     } catch (error) {
-      console.error("Error fetching messages:", error)
-      setUseDB(false)
-      setMessages(mockMessages)
-      setDbError(`${error}`)
+      console.error("Error in fetchMessages:", error)
+      setDbError("Failed to fetch messages. Please try again.")
       setIsLoading(false)
+    }
+  }
+
+  // Helper function to handle database errors
+  const handleDatabaseError = (error: string) => {
+    const isConnectionError = error === "DATABASE_CONNECTION_ERROR"
+    setConnectionFailed(isConnectionError)
+    setDbError(
+      isConnectionError
+        ? "Database connection failed. Please check your database configuration."
+        : "An error occurred while fetching messages."
+    )
+    if (isConnectionError) {
+      setIsPollingSuspended(true)
+    }
+  }
+
+  // Helper function to handle new messages
+  const handleNewMessages = (newMessages: Message[]) => {
+    if (tempMessages.length > 0) {
+      handleTempMessages(newMessages)
+    }
+
+    const shouldScroll = shouldTriggerScroll(
+      newMessages,
+      prevMessagesLengthRef.current,
+      userJustSentMessage,
+      isAutoScrollEnabled // Pass the state here
+    )
+
+    if (shouldScroll) {
+      setShouldScrollToBottom(true)
+      setUserJustSentMessage(false)
+    }
+
+    prevMessagesLengthRef.current = newMessages.length
+    setMessages(newMessages)
+    setDbError(null)
+    setConnectionFailed(false)
+  }
+
+  // Helper function to handle temporary messages
+  const handleTempMessages = (newMessages: Message[]) => {
+    const remainingTempMessages = deduplicateMessages(newMessages, tempMessages)
+    setTempMessages(remainingTempMessages)
+
+    if (messageContentRef.current) {
+      const sentMessageExists = newMessages.some(
+        (dbMsg) =>
+          dbMsg.role === "user" && dbMsg.content === messageContentRef.current
+      )
+
+      if (sentMessageExists) {
+        setSendingMessage(false)
+        messageContentRef.current = null
+      }
     }
   }
 
   // Set up polling
   useEffect(() => {
-    // Initial fetch on mount or when mode changes
+    // Initial fetch on mount
     fetchMessages()
 
-    const interval = sendingMessage ? 1000 : 2000
+    // Only set up polling if not suspended
+    if (!isPollingSuspended) {
+      const interval = sendingMessage ? 1000 : 2000
 
-    pollingIntervalRef.current = setInterval(() => {
-      fetchMessages()
-    }, interval)
+      pollingIntervalRef.current = setInterval(() => {
+        fetchMessages()
+      }, interval)
 
-    return () => {
+      return () => {
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current)
+        }
+      }
+    } else {
+      // Clean up any existing interval when suspended
       if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current)
+        pollingIntervalRef.current = null
       }
     }
-  }, [useDB, sendingMessage])
+  }, [sendingMessage, isPollingSuspended])
 
   // When initial messages are updated from props
   useEffect(() => {
@@ -140,7 +166,9 @@ export default function ClientChatInterface({
   }, [initialMessages, messages.length])
 
   const handleRefresh = () => {
-    setIsLoading(true)
+    // Re-enable polling if it was suspended
+    setIsPollingSuspended(false)
+    setConnectionFailed(false)
     setShouldScrollToBottom(true)
     fetchMessages()
   }
@@ -151,12 +179,21 @@ export default function ClientChatInterface({
     messageContentRef.current = null
   }
 
-  const handleToggleDataSource = () => {
-    setUseDB(!useDB)
-    setShouldScrollToBottom(true)
-  }
-
   const handleSendMessage = async (text: string) => {
+    // If we have a connection error, prevent sending
+    if (connectionFailed) {
+      // Show a temporary error that sending is disabled
+      setDbError(
+        "Cannot send messages while disconnected from the database. Please restore connection and refresh."
+      )
+      setTimeout(() => {
+        setDbError(
+          "Database connection failed. Please check your database configuration."
+        )
+      }, 3000)
+      return
+    }
+
     if (sendingMessage) return
 
     messageContentRef.current = text
@@ -230,6 +267,11 @@ export default function ClientChatInterface({
     setShouldScrollToBottom(false)
   }
 
+  // Add handler for scroll state changes
+  const handleScrollStateChange = (isAtBottom: boolean) => {
+    setIsAutoScrollEnabled(isAtBottom)
+  }
+
   // Filter to only show user and assistant messages
   const filterAllowedRoles = (msgs: Message[]): Message[] => {
     return msgs.filter((msg) => msg.role === "user" || msg.role === "assistant")
@@ -243,7 +285,7 @@ export default function ClientChatInterface({
   const combinedMessages = [...filteredMessages, ...filteredTempMessages]
 
   return (
-    <div className="mx-auto flex h-screen min-w-[350px] max-w-2xl flex-col rounded-lg bg-primary-foreground shadow-lg">
+    <div className="mx-auto flex h-screen min-w-[500px] max-w-2xl flex-col rounded-lg bg-primary-foreground shadow-lg">
       {/* Header section */}
       <div className="flex items-center justify-between bg-primary px-4 py-3">
         <div className="flex items-center space-x-3">
@@ -253,6 +295,16 @@ export default function ClientChatInterface({
           <h1 className="text-xl font-semibold text-primary-foreground">
             Twiga
           </h1>
+          {/* Database status indicator */}
+          {connectionFailed ? (
+            <div className="flex items-center rounded-full bg-red-500 px-2 py-0.5 text-xs text-white">
+              <Database className="mr-1 size-3" /> Disconnected
+            </div>
+          ) : (
+            <div className="flex items-center rounded-full bg-green-500 px-2 py-0.5 text-xs text-white">
+              <Database className="mr-1 size-3" /> Connected
+            </div>
+          )}
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -268,12 +320,33 @@ export default function ClientChatInterface({
             <DropdownMenuItem onClick={handleClearChat}>
               Clear chat
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleToggleDataSource}>
-              {useDB ? "Use Mock Data" : "Use Database"}
-            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      {/* Database error notification */}
+      {connectionFailed && (
+        <div className="flex items-center justify-between gap-4 bg-red-50 px-6 py-3 text-sm text-red-800">
+          <div className="flex items-center">
+            <AlertCircle className="mr-2 size-5 text-red-600" />
+            <div>
+              <p className="font-medium">Database Connection Error</p>
+              <p className="text-xs">
+                Please check your database configuration and ensure PostgreSQL
+                is running.
+              </p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            onClick={handleRefresh}
+            className="whitespace-nowrap"
+          >
+            <RefreshCw className="mr-2 size-4" />
+            Retry Connection
+          </Button>
+        </div>
+      )}
 
       {/* Chat area */}
       <div className="relative min-h-0 flex-1 overflow-hidden">
@@ -282,16 +355,25 @@ export default function ClientChatInterface({
             <Loader2 className="mr-2 size-6 animate-spin" />
             Loading messages...
           </div>
+        ) : combinedMessages.length === 0 ? (
+          <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
+            <MessageSquare className="mb-4 size-12 opacity-20" />
+            <h3 className="mb-1 text-lg font-medium">No messages yet</h3>
+            <p className="text-center text-sm">
+              Start a conversation by sending a message below
+            </p>
+          </div>
         ) : (
           <>
             <ChatContainer
               messages={combinedMessages}
               shouldScrollToBottom={shouldScrollToBottom}
               onScrollComplete={handleScrollComplete}
+              onScrollStateChange={handleScrollStateChange} // Add this prop
             />
-            {(!useDB || dbError) && (
-              <div className="absolute bottom-4 left-4 rounded bg-yellow-100 px-3 py-1 text-xs text-yellow-800">
-                {dbError || "Using mock data"}
+            {dbError && !connectionFailed && (
+              <div className="absolute bottom-4 left-4 rounded bg-red-100 px-3 py-1 text-xs text-red-800">
+                {dbError}
               </div>
             )}
           </>
@@ -303,6 +385,12 @@ export default function ClientChatInterface({
         <ChatInput
           onSendMessage={handleSendMessage}
           isLoading={sendingMessage}
+          disabled={connectionFailed}
+          placeholder={
+            connectionFailed
+              ? "Database connection required to send messages"
+              : "Type a message..."
+          }
         />
       </div>
     </div>

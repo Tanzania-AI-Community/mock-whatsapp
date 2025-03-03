@@ -1,62 +1,66 @@
 "use server"
 
-import { mockMessages } from "@/data/mockMessages"
 import { db } from "@/db"
 
 import { type Message } from "@/types/chat"
 
 /**
- * Server action to fetch messages directly from the database
- * Can be called from both server and client components
+ * Helper function to check if an error is a connection error
  */
-export async function getMessages(limit: number = 100): Promise<Message[]> {
+function isConnectionError(error: unknown): boolean {
+  const errorString = String(error)
+  return (
+    errorString.includes("ECONNREFUSED") ||
+    errorString.includes("connection refused") ||
+    errorString.includes("Connection terminated") ||
+    (error instanceof AggregateError &&
+      error.errors?.some((e) => String(e).includes("ECONNREFUSED")))
+  )
+}
+
+export async function getMessages(limit: number = 100): Promise<{
+  messages: Message[]
+  error?: string
+}> {
   try {
-    // First check if db.query.messages exists
     if (!db.query?.messages?.findMany) {
-      console.error("Database client is not properly initialized")
-      return mockMessages
-    }
-
-    let dbMessages
-
-    try {
-      // Using drizzle ORM query builder
-      dbMessages = await db.query.messages.findMany({
-        limit,
-        orderBy: (messages, { desc }) => [desc(messages.created_at)],
-      })
-    } catch (queryError) {
-      console.error("Database query failed:", queryError)
-      return mockMessages
-    }
-
-    // Check if we got results
-    if (!dbMessages || dbMessages.length === 0) {
-      console.log("No messages found in database, using mock data")
-      return mockMessages
-    }
-
-    // Format the messages to match our frontend Message type
-    const formattedMessages: Message[] = dbMessages.map((msg) => {
-      // Convert created_at to timestamp if it exists
-      const timestamp = msg.created_at
-        ? Math.floor(new Date(msg.created_at).getTime() / 1000)
-        : Math.floor(Date.now() / 1000)
-
+      console.error("Database connection error")
       return {
-        id: msg.id ?? crypto.randomUUID(),
-        role: msg.role as Message["role"],
-        content: msg.content ?? "",
-        created_at: msg.created_at,
-        timestamp: timestamp,
-        status: "sent",
+        messages: [],
+        error: "DATABASE_CONNECTION_ERROR",
       }
+    }
+
+    const dbMessages = await db.query.messages.findMany({
+      limit,
+      orderBy: (messages, { desc }) => [desc(messages.created_at)],
     })
 
-    return formattedMessages
+    // Always return an array, even if empty
+    if (!dbMessages) {
+      console.error("Database error: no messages found")
+      return { messages: [] }
+    }
+
+    const formattedMessages: Message[] = dbMessages.map((msg) => ({
+      id: msg.id ?? crypto.randomUUID(),
+      role: msg.role as Message["role"],
+      content: msg.content ?? "",
+      created_at: msg.created_at,
+      timestamp: msg.created_at
+        ? Math.floor(new Date(msg.created_at).getTime() / 1000)
+        : Math.floor(Date.now() / 1000),
+      status: "sent",
+    }))
+
+    return { messages: formattedMessages }
   } catch (error) {
-    console.error("Error fetching messages:", error)
-    // Return mock data as fallback
-    return mockMessages
+    console.error("Database error:", error)
+    return {
+      messages: [],
+      error: isConnectionError(error)
+        ? "DATABASE_CONNECTION_ERROR"
+        : "DATABASE_ERROR",
+    }
   }
 }

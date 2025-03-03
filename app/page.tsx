@@ -5,18 +5,10 @@ import ClientChatInterface from "@/components/ClientChatInterface"
 
 import { getMessages } from "./actions/messages"
 
-// Make this an async function so we can fetch data server-side
 export default async function Home() {
   // Prefetch messages server-side
-  let messages: any = []
-  let isError = false
-
-  try {
-    messages = await getMessages()
-  } catch (error) {
-    console.error("Error pre-fetching messages:", error)
-    isError = true
-  }
+  const response = await getMessages()
+  const { messages = [], error } = response
 
   return (
     <Suspense
@@ -25,10 +17,11 @@ export default async function Home() {
           <Loader2 className="size-8 animate-spin text-primary" />
         </div>
       }
+      // TODO Add a skeleton loader here
     >
       <ClientChatInterface
         initialMessages={messages}
-        isInitialLoading={isError || messages.length === 0}
+        isInitialLoading={!!error}
       />
     </Suspense>
   )

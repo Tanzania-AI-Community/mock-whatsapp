@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react"
-import { format, isSameDay, isToday, isYesterday } from "date-fns"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { ArrowDown } from "lucide-react"
 
 import { type Message } from "@/types/chat"
+import { formatDateDivider, groupMessagesByDate } from "@/lib/messageUtils"
 import { cn } from "@/lib/utils"
 
 import { ChatMessage } from "./ChatMessage"
@@ -12,12 +12,14 @@ interface ChatContainerProps {
   messages: Message[]
   shouldScrollToBottom?: boolean
   onScrollComplete?: () => void
+  onScrollStateChange?: (isAtBottom: boolean) => void
 }
 
 export const ChatContainer = ({
   messages,
   shouldScrollToBottom = false,
   onScrollComplete,
+  onScrollStateChange,
 }: ChatContainerProps) => {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -25,53 +27,62 @@ export const ChatContainer = ({
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true)
   const prevMessagesLengthRef = useRef(messages.length)
 
-  // Improved scroll-to-bottom utility
-  const scrollToBottom = (smooth: boolean = true) => {
-    if (containerRef.current) {
-      const container = containerRef.current
+  // Improved scroll-to-bottom utility with useCallback
+  const scrollToBottom = useCallback(
+    (smooth: boolean = true) => {
+      if (containerRef.current) {
+        const container = containerRef.current
 
-      // For smoother scroll, use a small delay to ensure DOM is fully updated
-      setTimeout(() => {
-        try {
-          // First attempt: direct DOM manipulation for reliable scrolling
-          container.scrollTop = container.scrollHeight
+        // For smoother scroll, use a small delay to ensure DOM is fully updated
+        setTimeout(() => {
+          try {
+            // First attempt: direct DOM manipulation for reliable scrolling
+            container.scrollTop = container.scrollHeight
 
-          // Then use smooth scrolling for animation if requested
-          if (smooth) {
-            container.scrollTo({
-              top: container.scrollHeight,
-              behavior: "smooth",
-            })
+            // Then use smooth scrolling for animation if requested
+            if (smooth) {
+              container.scrollTo({
+                top: container.scrollHeight,
+                behavior: "smooth",
+              })
+            }
+
+            // Alternative method using the messages end ref as backup
+            if (messagesEndRef.current) {
+              messagesEndRef.current.scrollIntoView({
+                behavior: smooth ? "smooth" : "auto",
+                block: "end",
+              })
+            }
+
+            // After scrolling, mark that we don't need the button
+            setShowScrollButton(false)
+
+            // Update auto-scroll state
+            setIsAutoScrollEnabled(true)
+
+            // If using smooth scroll, wait for animation to complete before notifying parent
+            if (smooth && onScrollComplete) {
+              setTimeout(onScrollComplete, 300) // approximate duration of smooth scroll
+            } else if (onScrollComplete) {
+              onScrollComplete()
+            }
+          } catch (e) {
+            console.error("Error scrolling to bottom:", e)
+            // Fallback: direct scroll assignment
+            container.scrollTop = container.scrollHeight
           }
-
-          // Alternative method using the messages end ref as backup
-          if (messagesEndRef.current) {
-            messagesEndRef.current.scrollIntoView({
-              behavior: smooth ? "smooth" : "auto",
-              block: "end",
-            })
-          }
-
-          // After scrolling, mark that we don't need the button
-          setShowScrollButton(false)
-
-          // Update auto-scroll state
-          setIsAutoScrollEnabled(true)
-
-          // If using smooth scroll, wait for animation to complete before notifying parent
-          if (smooth && onScrollComplete) {
-            setTimeout(onScrollComplete, 300) // approximate duration of smooth scroll
-          } else if (onScrollComplete) {
-            onScrollComplete()
-          }
-        } catch (e) {
-          console.error("Error scrolling to bottom:", e)
-          // Fallback: direct scroll assignment
-          container.scrollTop = container.scrollHeight
-        }
-      }, 50)
-    }
-  }
+        }, 50)
+      }
+    },
+    [
+      messagesEndRef,
+      containerRef,
+      setShowScrollButton,
+      setIsAutoScrollEnabled,
+      onScrollComplete,
+    ]
+  )
 
   // More accurate scroll position detection
   const handleScroll = () => {
@@ -89,10 +100,9 @@ export const ChatContainer = ({
       setShowScrollButton(!isAtBottom)
     }
 
-    if (isAtBottom && !isAutoScrollEnabled) {
-      setIsAutoScrollEnabled(true)
-    } else if (!isAtBottom && isAutoScrollEnabled) {
-      setIsAutoScrollEnabled(false)
+    if (isAtBottom !== isAutoScrollEnabled) {
+      setIsAutoScrollEnabled(isAtBottom)
+      onScrollStateChange?.(isAtBottom)
     }
   }
 
@@ -128,10 +138,12 @@ export const ChatContainer = ({
 
   // Check for new messages and scroll accordingly
   useEffect(() => {
+    if (messages.length === 0) return
+
     const hasNewMessages = messages.length > prevMessagesLengthRef.current
 
     // Always scroll on initial load or when explicitly requested
-    if (shouldScrollToBottom || messages.length === 0) {
+    if (shouldScrollToBottom) {
       // Short delay to ensure component is fully rendered
       setTimeout(() => scrollToBottom(true), 100)
     }
@@ -146,14 +158,15 @@ export const ChatContainer = ({
 
     // Update the ref regardless
     prevMessagesLengthRef.current = messages.length
-  }, [messages, shouldScrollToBottom, isAutoScrollEnabled])
+  }, [messages, shouldScrollToBottom, isAutoScrollEnabled, scrollToBottom])
 
   // Force a scroll position check when component mounts
   useEffect(() => {
+    // Only run this effect if we have messages
+    if (messages.length === 0) return
+
     // Initial scroll to bottom
-    if (messages.length > 0) {
-      scrollToBottom(false)
-    }
+    scrollToBottom(false)
 
     // Schedule a position check after everything has rendered
     const checkTimer = setTimeout(() => {
@@ -163,15 +176,9 @@ export const ChatContainer = ({
     return () => clearTimeout(checkTimer)
   }, [])
 
-  const getDateDivider = (timestamp: number) => {
-    const date = new Date(timestamp * 1000)
-    if (isToday(date)) {
-      return "Today"
-    }
-    if (isYesterday(date)) {
-      return "Yesterday"
-    }
-    return format(date, "MMMM d, yyyy")
+  // If no messages, render the empty state
+  if (messages.length === 0) {
+    return null
   }
 
   // Sort messages by timestamp to ensure chronological order
@@ -204,7 +211,7 @@ export const ChatContainer = ({
             <div key={group.date} className="space-y-2">
               <div className="flex justify-center self-center">
                 <div className="rounded-full bg-white px-4 py-1 text-sm text-muted-foreground shadow-sm">
-                  {getDateDivider(group.date)}
+                  {formatDateDivider(group.date)}
                 </div>
               </div>
               {group.messages.map((message) => (
@@ -236,34 +243,4 @@ export const ChatContainer = ({
       </Button>
     </div>
   )
-}
-
-// Helper function to group messages by date
-function groupMessagesByDate(messages: Message[]) {
-  const groups: { date: number; messages: Message[] }[] = []
-
-  messages.forEach((message) => {
-    const timestamp =
-      message.timestamp ||
-      (message.created_at
-        ? Math.floor(new Date(message.created_at).getTime() / 1000)
-        : Math.floor(Date.now() / 1000))
-
-    const lastGroup = groups[groups.length - 1]
-    const messageDate = new Date(timestamp * 1000)
-
-    if (
-      !lastGroup ||
-      !isSameDay(new Date(lastGroup.date * 1000), messageDate)
-    ) {
-      groups.push({
-        date: timestamp,
-        messages: [message],
-      })
-    } else {
-      lastGroup.messages.push(message)
-    }
-  })
-
-  return groups
 }

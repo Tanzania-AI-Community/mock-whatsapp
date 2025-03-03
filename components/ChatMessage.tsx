@@ -61,7 +61,7 @@ export const ChatMessage = ({ message }: ChatMessageProps) => {
       case "sent":
         return <CheckCheck className="size-4 text-muted-foreground" />
       case "error":
-        return <Check className="size-4 text-red-500" />
+        return <Check className="size-4 text-destructive" />
       default:
         return <Check className="size-4 text-muted-foreground" />
     }
@@ -69,6 +69,7 @@ export const ChatMessage = ({ message }: ChatMessageProps) => {
 
   return (
     <div
+      // eslint-disable-next-line tailwindcss/no-custom-classname
       className={cn(
         `message-appear flex flex-col space-y-1 ${isSender ? "items-end" : "items-start"}`,
         isTemporary && "animate-pulse",
