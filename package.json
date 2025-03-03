@@ -9,7 +9,6 @@
     "build": "next build && cp -r public .next/standalone/ && cp -r .next/static .next/standalone/.next/",
     "dev": "next dev",
     "start": "cd .next/standalone && node server.js",
-    "build-deploy": "./deploy.sh",
     "lint": "next lint",
     "lint:fix": "next lint --fix",
     "typecheck": "tsc --noEmit",

@@ -12,8 +12,7 @@ export const env = createEnv({
       .default("development"),
     DATABASE_URL: z.string().url(),
     // WhatsApp API environment variables
-    WHATSAPP_API_URL: z.string().url(),
-    WHATSAPP_API_TOKEN: z.string(),
+    CHATBOT_CALLBACK_URL: z.string().url(),
   },
 
   /**
@@ -29,8 +28,7 @@ export const env = createEnv({
   runtimeEnv: {
     DATABASE_URL: process.env.DATABASE_URL,
     NODE_ENV: process.env.NODE_ENV,
-    WHATSAPP_API_URL: process.env.WHATSAPP_API_URL,
-    WHATSAPP_API_TOKEN: process.env.WHATSAPP_API_TOKEN,
+    CHATBOT_CALLBACK_URL: process.env.CHATBOT_CALLBACK_URL,
   },
   skipValidation: !!process.env.SKIP_ENV_VALIDATION,
   emptyStringAsUndefined: true,
