@@ -13,8 +13,6 @@ export interface Message {
   user_id?: number
   role: MessageRole
   content: string | null
-  tool_calls?: any[] | null
-  tool_call_id?: string | null
   tool_name?: string | null
   created_at?: string | Date | number
   timestamp?: number

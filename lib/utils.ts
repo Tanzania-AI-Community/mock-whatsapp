@@ -62,6 +62,11 @@ export function isUUID(str: string) {
   return uuidRegex.test(str)
 }
 
+// Helper function to check if content is empty or null
+export function isEmptyContent(content: string | null | undefined): boolean {
+  return content === null || content === undefined || content.trim() === ""
+}
+
 /**
  * Check if two message contents are similar
  * This is used to detect potential duplicates
@@ -123,4 +128,15 @@ export function deduplicateMessages(
  */
 export function filterMessagesByRole(messages: Message[]): Message[] {
   return messages.filter((message) => isDisplayRole(message.role))
+}
+
+// Helper function to convert snake_case to Title Case
+export function formatToolName(name: string | null | undefined): string {
+  if (!name) return ""
+
+  // Split by underscore or hyphen
+  return name
+    .split(/[_-]/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ")
 }

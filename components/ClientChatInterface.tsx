@@ -97,7 +97,7 @@ export default function ClientChatInterface({
       newMessages,
       prevMessagesLengthRef.current,
       userJustSentMessage,
-      isAutoScrollEnabled // Pass the state here
+      isAutoScrollEnabled
     )
 
     if (shouldScroll) {
@@ -273,9 +273,12 @@ export default function ClientChatInterface({
     setIsAutoScrollEnabled(isAtBottom)
   }
 
-  // Filter to only show user and assistant messages
+  // Filter to only show user, assistant messages and tool messages
   const filterAllowedRoles = (msgs: Message[]): Message[] => {
-    return msgs.filter((msg) => msg.role === "user" || msg.role === "assistant")
+    return msgs.filter(
+      (msg) =>
+        msg.role === "user" || msg.role === "assistant" || msg.role === "tool"
+    )
   }
 
   // Combine real and temporary messages for display, filtering out unwanted roles

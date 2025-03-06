@@ -28,9 +28,19 @@ export const ChatContainer = ({
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true)
   const prevMessagesLengthRef = useRef(messages.length)
 
-  // Memoize sorted messages
+  console.log("Messages in container :", messages)
+
+  // Filter out empty non-tool messages
+  const validMessages = useMemo(() => {
+    return messages.filter((msg) => {
+      if (msg.role === "tool") return true
+      return msg.content && msg.content.trim() !== ""
+    })
+  }, [messages])
+
+  // Memoize sorted messages using the filtered messages
   const sortedMessages = useMemo(() => {
-    return [...messages].sort((a, b) => {
+    return [...validMessages].sort((a, b) => {
       // Temporary messages always at the end
       if (a.isTemp && !b.isTemp) return 1
       if (!a.isTemp && b.isTemp) return -1
@@ -44,7 +54,7 @@ export const ChatContainer = ({
         (b.created_at ? new Date(b.created_at).getTime() / 1000 : 0)
       return timestampA - timestampB
     })
-  }, [messages])
+  }, [validMessages])
 
   // Memoize message groups by date
   const messageGroups = useMemo(() => {

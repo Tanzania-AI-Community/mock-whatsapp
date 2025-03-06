@@ -58,12 +58,10 @@ export async function sendWhatsAppMessage({
       ],
     }
 
-    // Make the API call using properly typed env variables
     const response = await fetch(env.CHATBOT_CALLBACK_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${env.WHATSAPP_API_TOKEN}`,
       },
       body: JSON.stringify(payload),
     })

@@ -46,6 +46,7 @@ export async function getMessages(limit: number = 100): Promise<{
       id: msg.id ?? crypto.randomUUID(),
       role: msg.role as Message["role"],
       content: msg.content ?? "",
+      tool_name: msg.tool_name ?? null,
       created_at: msg.created_at,
       timestamp: msg.created_at
         ? Math.floor(new Date(msg.created_at).getTime() / 1000)
