@@ -1,0 +1,12 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    versioning-strategy: increase
+    # For pnpm projects, Dependabot uses package-ecosystem: npm.
+    # Do not configure transitive/indirect updates here; unsupported for this ecosystem.
+    allow:
+      - dependency-type: "direct"
