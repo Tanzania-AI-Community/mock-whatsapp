@@ -72,6 +72,19 @@ export function isEmptyContent(content: string | null | undefined): boolean {
  * This is used to detect potential duplicates
  */
 export function areSimilarMessages(msg1: Message, msg2: Message): boolean {
+  const msg1Images = msg1.images ?? []
+  const msg2Images = msg2.images ?? []
+
+  if (msg1Images.length > 0 || msg2Images.length > 0) {
+    if (msg1Images.length !== msg2Images.length) return false
+
+    return msg1Images.every((image, index) => {
+      const other = msg2Images[index]
+      if (!other) return false
+      return image.id === other.id || image.url === other.url
+    })
+  }
+
   // If content is exactly the same, they're similar
   if (msg1.content === msg2.content) return true
 

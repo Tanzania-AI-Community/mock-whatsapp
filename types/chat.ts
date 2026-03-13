@@ -13,11 +13,28 @@ export interface Message {
   user_id?: number
   role: MessageRole
   content: string | null
+  images?: ChatImageAttachment[]
   tool_name?: string | null
   created_at?: string | Date | number
   timestamp?: number
   status?: "sending" | "sent" | "error"
   isTemp?: boolean // Flag for temporary messages
+}
+
+export interface ChatImageAttachment {
+  id: string
+  mimeType: string
+  url?: string
+  fileName?: string
+  caption?: string
+}
+
+export interface OutboundImageUpload {
+  id: string
+  fileName: string
+  mimeType: string
+  dataUrl: string
+  size: number
 }
 
 // User state definitions from Python schema
