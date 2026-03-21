@@ -1,5 +1,12 @@
 import { sql } from "drizzle-orm"
-import { pgTable, serial, text, timestamp, varchar } from "drizzle-orm/pg-core"
+import {
+  boolean,
+  pgTable,
+  serial,
+  text,
+  timestamp,
+  varchar,
+} from "drizzle-orm/pg-core"
 
 // Define MessageRole enum to match Python enum
 export const MessageRole = {
@@ -16,6 +23,9 @@ export const messages = pgTable("messages", {
   role: varchar("role", { length: 20 }).notNull(),
   content: text("content"),
   tool_name: varchar("tool_name", { length: 255 }),
+  is_present_in_conversation: boolean("is_present_in_conversation")
+    .notNull()
+    .default(true),
   created_at: timestamp("created_at", { withTimezone: true })
     .default(sql`now()`)
     .notNull(),

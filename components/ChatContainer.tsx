@@ -30,10 +30,9 @@ export const ChatContainer = ({
 
   console.log("Messages in container :", messages)
 
-  // Filter out empty non-tool messages
+  // Filter out empty messages.
   const validMessages = useMemo(() => {
     return messages.filter((msg) => {
-      if (msg.role === "tool") return true
       return msg.content && msg.content.trim() !== ""
     })
   }, [messages])

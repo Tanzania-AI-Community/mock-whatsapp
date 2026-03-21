@@ -3,7 +3,7 @@ import { format } from "date-fns"
 import { Check, CheckCheck } from "lucide-react"
 
 import { type Message } from "@/types/chat"
-import { cn, formatToolName } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 
 interface ChatMessageProps {
   message: Message
@@ -23,7 +23,6 @@ const areEqual = (prevProps: ChatMessageProps, nextProps: ChatMessageProps) => {
 const ChatMessageComponent = ({ message }: ChatMessageProps) => {
   console.log("Message :", message)
   const isSender = message.role === "user"
-  const isTool = message.role === "tool"
   const isTemporary = message.isTemp === true
 
   // State for fading animation
@@ -81,14 +80,9 @@ const ChatMessageComponent = ({ message }: ChatMessageProps) => {
     }
   }, [isSender, message.status])
 
-  // Format the tool name nicely if present
-  const formattedToolName = useMemo(() => {
-    return formatToolName(message.tool_name)
-  }, [message.tool_name])
-
-  // Early return for empty non-tool messages - don't render them at all
-  // This comes AFTER all hook calls to avoid the React Hook rule violation
-  if (!isTool && isEmptyContent) {
+  // Early return for empty messages - don't render them at all.
+  // This comes AFTER all hook calls to avoid the React Hook rule violation.
+  if (isEmptyContent) {
     return null
   }
 
@@ -113,17 +107,7 @@ const ChatMessageComponent = ({ message }: ChatMessageProps) => {
           }`}
         >
           <p className="break-words text-[15px] leading-relaxed">
-            {isTool && (
-              <span className="mb-1 block font-medium">
-                ⚙️ Using tool :
-                {message.tool_name && (
-                  <span className="ml-1 inline-block rounded-md bg-blue-100 px-1.5 py-0.5 text-sm font-semibold text-blue-700">
-                    {formattedToolName}
-                  </span>
-                )}
-              </span>
-            )}
-            {!isTool && message.content && <span>{message.content}</span>}
+            {message.content && <span>{message.content}</span>}
           </p>
           <div className="-mb-1 flex items-center justify-end space-x-1">
             <span className="text-xs text-muted-foreground">
