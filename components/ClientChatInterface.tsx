@@ -273,11 +273,10 @@ export default function ClientChatInterface({
     setIsAutoScrollEnabled(isAtBottom)
   }
 
-  // Filter to only show user, assistant messages and tool messages
+  // Filter to only show user and assistant messages.
   const filterAllowedRoles = (msgs: Message[]): Message[] => {
     return msgs.filter(
-      (msg) =>
-        msg.role === "user" || msg.role === "assistant" || msg.role === "tool"
+      (msg) => msg.role === "user" || msg.role === "assistant"
     )
   }
 
