@@ -40,11 +40,9 @@ export default function ClientChatInterface({
   const [dbError, setDbError] = useState<string | null>(null)
   const [connectionFailed, setConnectionFailed] = useState(false)
   const [tempMessages, setTempMessages] = useState<Message[]>([])
-  const [sendingMessage, setSendingMessage] = useState(false)
   const [shouldScrollToBottom, setShouldScrollToBottom] = useState(true)
   const [isPollingSuspended, setIsPollingSuspended] = useState(false)
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
-  const messageContentRef = useRef<string | null>(null)
   const prevMessagesLengthRef = useRef(initialMessages.length)
   const [userJustSentMessage, setUserJustSentMessage] = useState(false)
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true) // Add this state
@@ -115,18 +113,6 @@ export default function ClientChatInterface({
   const handleTempMessages = (newMessages: Message[]) => {
     const remainingTempMessages = deduplicateMessages(newMessages, tempMessages)
     setTempMessages(remainingTempMessages)
-
-    if (messageContentRef.current) {
-      const sentMessageExists = newMessages.some(
-        (dbMsg) =>
-          dbMsg.role === "user" && dbMsg.content === messageContentRef.current
-      )
-
-      if (sentMessageExists) {
-        setSendingMessage(false)
-        messageContentRef.current = null
-      }
-    }
   }
 
   // Set up polling
@@ -136,11 +122,9 @@ export default function ClientChatInterface({
 
     // Only set up polling if not suspended
     if (!isPollingSuspended) {
-      const interval = sendingMessage ? 1000 : 2000
-
       pollingIntervalRef.current = setInterval(() => {
         fetchMessages()
-      }, interval)
+      }, 2000)
 
       return () => {
         if (pollingIntervalRef.current) {
@@ -155,7 +139,7 @@ export default function ClientChatInterface({
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sendingMessage, isPollingSuspended])
+  }, [isPollingSuspended])
 
   // When initial messages are updated from props
   useEffect(() => {
@@ -177,10 +161,9 @@ export default function ClientChatInterface({
   const handleClearChat = () => {
     setMessages([])
     setTempMessages([])
-    messageContentRef.current = null
   }
 
-  const handleSendMessage = async (text: string) => {
+  const handleSendMessage = (text: string) => {
     // If we have a connection error, prevent sending
     if (connectionFailed) {
       // Show a temporary error that sending is disabled
@@ -194,10 +177,6 @@ export default function ClientChatInterface({
       }, 3000)
       return
     }
-
-    if (sendingMessage) return
-
-    messageContentRef.current = text
 
     // Set flag that user just sent a message to ensure scroll
     setUserJustSentMessage(true)
@@ -216,51 +195,41 @@ export default function ClientChatInterface({
     }
 
     setTempMessages((prev) => [...prev, tempMessage])
-    setSendingMessage(true)
-
-    try {
-      const result = await sendWhatsAppMessage({ body: text })
-
-      if (!result.success) {
-        throw new Error("Failed to send message to WhatsApp API")
-      }
-
-      await fetchMessages()
-
-      setTempMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === tempMessage.id ? { ...msg, status: "sent" } : msg
-        )
-      )
-
-      setTimeout(() => {
-        setTempMessages((prev) =>
-          prev.filter((msg) => msg.id !== tempMessage.id)
-        )
-        if (messageContentRef.current === text) {
-          messageContentRef.current = null
+    void sendWhatsAppMessage({ body: text })
+      .then((result) => {
+        if (!result.success) {
+          throw new Error("Failed to send message to WhatsApp API")
         }
-        setSendingMessage(false)
-      }, 10000)
-    } catch (error) {
-      console.error("Error sending message:", error)
 
-      setTempMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === tempMessage.id ? { ...msg, status: "error" } : msg
-        )
-      )
-
-      setTimeout(() => {
         setTempMessages((prev) =>
-          prev.filter((msg) => msg.id !== tempMessage.id)
+          prev.map((msg) =>
+            msg.id === tempMessage.id ? { ...msg, status: "sent" } : msg
+          )
         )
-        if (messageContentRef.current === text) {
-          messageContentRef.current = null
-        }
-        setSendingMessage(false)
-      }, 5000)
-    }
+
+        void fetchMessages()
+
+        setTimeout(() => {
+          setTempMessages((prev) =>
+            prev.filter((msg) => msg.id !== tempMessage.id)
+          )
+        }, 10000)
+      })
+      .catch((error) => {
+        console.error("Error sending message:", error)
+
+        setTempMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === tempMessage.id ? { ...msg, status: "error" } : msg
+          )
+        )
+
+        setTimeout(() => {
+          setTempMessages((prev) =>
+            prev.filter((msg) => msg.id !== tempMessage.id)
+          )
+        }, 5000)
+      })
   }
 
   const handleScrollComplete = () => {
@@ -275,9 +244,7 @@ export default function ClientChatInterface({
 
   // Filter to only show user and assistant messages.
   const filterAllowedRoles = (msgs: Message[]): Message[] => {
-    return msgs.filter(
-      (msg) => msg.role === "user" || msg.role === "assistant"
-    )
+    return msgs.filter((msg) => msg.role === "user" || msg.role === "assistant")
   }
 
   // Combine real and temporary messages for display, filtering out unwanted roles
@@ -387,7 +354,6 @@ export default function ClientChatInterface({
       <div className="p-4">
         <ChatInput
           onSendMessage={handleSendMessage}
-          isLoading={sendingMessage}
           disabled={connectionFailed}
           placeholder={
             connectionFailed
