@@ -55,7 +55,17 @@ pnpm install
 
 # Start the development server
 pnpm run dev
+
+# Start the read-only observer mode
+pnpm run observe
 ```
+
+When running `pnpm run observe`, the app prompts for a numeric `userId` and
+only loads messages from the `messages` table that:
+
+- belong to that `user_id`
+- have `is_present_in_conversation = true`
+- have a `user` or `assistant` role
 
 ## 📝 Configuration
 

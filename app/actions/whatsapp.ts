@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache"
 
+import { getAppMode } from "@/lib/appMode"
+
 import { env } from "../../env.js"
 
 interface SendMessageProps {
@@ -17,6 +19,13 @@ export async function sendWhatsAppMessage({
   recipientId = "255712345678",
 }: SendMessageProps) {
   try {
+    if (getAppMode() === "observe") {
+      return {
+        success: false,
+        error: "OBSERVE_MODE_READ_ONLY",
+      }
+    }
+
     // Create the WhatsApp Business API payload format
     const payload = {
       object: "whatsapp_business_account",
