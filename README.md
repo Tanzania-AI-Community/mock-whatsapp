@@ -18,6 +18,7 @@ This project provides a sandbox environment that allows developers to:
 ## ✨ Features
 
 - **Real-time messaging**: Send and receive messages with persistent storage
+- **Audio testing**: Upload voice-note files to test chatbot transcription
 - **WhatsApp-like UI**: Familiar interface mimicking WhatsApp Web
 - **Message status indicators**: "Sending", "Sent", and "Error" states
 - **Temporary message handling**: Optimistic updates with server reconciliation
@@ -66,6 +67,8 @@ To connect your chatbot:
 1. Set `CHATBOT_CALLBACK_URL` in your `.env` to point to your chatbot's webhook endpoint
 2. Ensure your chatbot responds with the expected format (see API documentation)
 3. Use the interface to send messages and receive responses
+
+For Twiga audio testing, point `CHATBOT_CALLBACK_URL` to Twiga's `/devhooks` endpoint and enable `MOCK_WHATSAPP=True` in Twiga. Use the audio button beside the message field to upload an audio file up to 16 MB.
 
 ## ⚖️ Disclaimer
 

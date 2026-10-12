@@ -23,7 +23,7 @@ import {
 import { ChatContainer } from "@/components/ChatContainer"
 import { ChatInput } from "@/components/ChatInput"
 import { getMessages } from "@/app/actions/messages"
-import { sendWhatsAppMessage } from "@/app/actions/whatsapp"
+import { sendWhatsAppAudio, sendWhatsAppMessage } from "@/app/actions/whatsapp"
 
 interface ClientChatInterfaceProps {
   initialMessages: Message[]
@@ -232,6 +232,59 @@ export default function ClientChatInterface({
       })
   }
 
+  const handleSendAudio = async (file: File) => {
+    if (connectionFailed) return
+    if (file.size > 16 * 1024 * 1024) {
+      setDbError("Audio files must be 16 MB or smaller.")
+      return
+    }
+
+    setUserJustSentMessage(true)
+    setShouldScrollToBottom(true)
+
+    const tempMessage: Message = {
+      id: Date.now(),
+      role: "user",
+      content: `Voice message: ${file.name}`,
+      created_at: new Date(),
+      timestamp: Math.floor(Date.now() / 1000),
+      status: "sending",
+      isTemp: true,
+    }
+
+    setTempMessages((prev) => [...prev, tempMessage])
+    const formData = new FormData()
+    formData.append("audio", file)
+
+    try {
+      const result = await sendWhatsAppAudio(formData)
+      if (!result.success) {
+        throw new Error(
+          "error" in result ? result.error : "Audio upload failed"
+        )
+      }
+
+      setTempMessages((prev) =>
+        prev.filter((message) => message.id !== tempMessage.id)
+      )
+      await fetchMessages()
+    } catch (error) {
+      console.error("Error sending audio:", error)
+      setTempMessages((prev) =>
+        prev.map((message) =>
+          message.id === tempMessage.id
+            ? { ...message, status: "error" }
+            : message
+        )
+      )
+      setTimeout(() => {
+        setTempMessages((prev) =>
+          prev.filter((message) => message.id !== tempMessage.id)
+        )
+      }, 5000)
+    }
+  }
+
   const handleScrollComplete = () => {
     // Reset the scroll flag after scrolling is complete
     setShouldScrollToBottom(false)
@@ -354,6 +407,7 @@ export default function ClientChatInterface({
       <div className="p-4">
         <ChatInput
           onSendMessage={handleSendMessage}
+          onSendAudio={handleSendAudio}
           disabled={connectionFailed}
           placeholder={
             connectionFailed
