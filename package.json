@@ -7,7 +7,7 @@
   "scripts": {
     "clean": "rimraf --glob **/node_modules **/dist **/.next pnpm-lock.yaml **/.tsbuildinfo",
     "build": "next build && cp -r public .next/standalone/ && cp -r .next/static .next/standalone/.next/",
-    "dev": "next dev",
+    "dev": "next dev -H 127.0.0.1",
     "start": "cd .next/standalone && node server.js",
     "lint": "next lint",
     "lint:fix": "next lint --fix",
