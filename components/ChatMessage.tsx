@@ -4,6 +4,7 @@ import { Check, CheckCheck } from "lucide-react"
 
 import { type Message } from "@/types/chat"
 import { cn } from "@/lib/utils"
+import { FormattedText } from "@/components/FormattedText"
 
 interface ChatMessageProps {
   message: Message
@@ -106,9 +107,9 @@ const ChatMessageComponent = ({ message }: ChatMessageProps) => {
               : "rounded-tl-sm bg-white text-foreground"
           }`}
         >
-          <p className="break-words text-[15px] leading-relaxed">
-            {message.content && <span>{message.content}</span>}
-          </p>
+          <div className="break-words text-[15px] leading-relaxed">
+            {message.content && <FormattedText text={message.content} />}
+          </div>
           <div className="-mb-1 flex items-center justify-end space-x-1">
             <span className="text-xs text-muted-foreground">
               {format(messageTime, "HH:mm")}
