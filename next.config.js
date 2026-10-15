@@ -11,6 +11,11 @@ const nextConfig = {
   // typescript: { ignoreBuildErrors: true },
   output: "standalone",
   transpilePackages: ["geist"],
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "24mb",
+    },
+  },
   images: {
     remotePatterns: [
       {
