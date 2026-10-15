@@ -1,5 +1,5 @@
-import { useRef, useState } from "react"
-import { AudioLines, Database, Loader2, Send } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { Database, Loader2, Mic, Send, Square } from "lucide-react"
 
 import { Button } from "./ui/button"
 import { Input } from "./ui/input"
@@ -19,7 +19,14 @@ export const ChatInput = ({
 }: ChatInputProps) => {
   const [message, setMessage] = useState("")
   const [isSendingAudio, setIsSendingAudio] = useState(false)
+  const [isRecording, setIsRecording] = useState(false)
   const audioInputRef = useRef<HTMLInputElement>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+
+  useEffect(() => {
+    return () => streamRef.current?.getTracks().forEach((track) => track.stop())
+  }, [])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -39,6 +46,56 @@ export const ChatInput = ({
       await onSendAudio(file)
     } finally {
       setIsSendingAudio(false)
+    }
+  }
+
+  const handleRecord = async () => {
+    if (isRecording) {
+      mediaRecorderRef.current?.stop()
+      return
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      audioInputRef.current?.click()
+      return
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream)
+      const chunks: Blob[] = []
+
+      streamRef.current = stream
+      mediaRecorderRef.current = recorder
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunks.push(event.data)
+      }
+      recorder.onstop = async () => {
+        setIsRecording(false)
+        stream.getTracks().forEach((track) => track.stop())
+        streamRef.current = null
+
+        const blob = new Blob(chunks, { type: recorder.mimeType })
+        if (blob.size === 0) return
+
+        const extension = recorder.mimeType.includes("mp4") ? "m4a" : "webm"
+        setIsSendingAudio(true)
+        try {
+          await onSendAudio(
+            new File([blob], `voice-message.${extension}`, {
+              type: recorder.mimeType,
+            })
+          )
+        } finally {
+          setIsSendingAudio(false)
+        }
+      }
+
+      recorder.start()
+      setIsRecording(true)
+    } catch (error) {
+      console.error("Unable to access microphone:", error)
+      window.alert("Microphone access is required to record a voice message.")
     }
   }
 
@@ -72,15 +129,19 @@ export const ChatInput = ({
         variant="ghost"
         size="icon"
         disabled={disabled || isSendingAudio}
-        onClick={() => audioInputRef.current?.click()}
-        aria-label="Send audio file"
-        title="Send audio file"
-        className="shrink-0"
+        onClick={() => void handleRecord()}
+        aria-label={
+          isRecording ? "Stop and send recording" : "Record voice message"
+        }
+        title={isRecording ? "Stop and send" : "Record voice message"}
+        className={isRecording ? "shrink-0 text-red-600" : "shrink-0"}
       >
         {isSendingAudio ? (
           <Loader2 className="size-4 animate-spin" />
+        ) : isRecording ? (
+          <Square className="size-4 fill-current" />
         ) : (
-          <AudioLines className="size-4" />
+          <Mic className="size-4" />
         )}
       </Button>
       <Button
