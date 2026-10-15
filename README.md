@@ -18,6 +18,7 @@ This project provides a sandbox environment that allows developers to:
 ## ✨ Features
 
 - **Real-time messaging**: Send and receive messages with persistent storage
+- **Audio input**: Record and send voice notes for transcription
 - **WhatsApp-like UI**: Familiar interface mimicking WhatsApp Web
 - **Message status indicators**: "Sending", "Sent", and "Error" states
 - **Temporary message handling**: Optimistic updates with server reconciliation
@@ -66,6 +67,32 @@ To connect your chatbot:
 1. Set `CHATBOT_CALLBACK_URL` in your `.env` to point to your chatbot's webhook endpoint
 2. Ensure your chatbot responds with the expected format (see API documentation)
 3. Use the interface to send messages and receive responses
+
+For Twiga audio input, point `CHATBOT_CALLBACK_URL` to Twiga's `/devhooks`
+endpoint and enable `MOCK_WHATSAPP=True` in Twiga. Configure the provider and
+model in Twiga's `.env`; the mock interface only reports what the backend used.
+
+Click the microphone, allow browser access, and record for up to two minutes.
+The recording bar shows a live waveform and timer. Select Send to stop and send
+the voice note immediately, or select Delete to cancel it. The sent message shows
+temporary audio playback, its transcript, and the provider/model used. Audio
+playback lasts only for the current browser session because Twiga does not yet
+store audio files.
+Development runs save audio metadata and the latest transcript in browser local
+storage. Use **Download audio results** in the chat menu to export it.
+
+For a useful comparison, record the same script for each backend configuration:
+
+1. Clear Swahili.
+2. Clear English.
+3. Mixed Swahili and English.
+4. Background noise or a weak microphone.
+5. Fast, quiet, and accent-varied speech.
+6. Education-specific names and terminology.
+
+Change only Twiga's `AUDIO_TRANSCRIPTION_PROVIDER` and
+`AUDIO_TRANSCRIPTION_MODEL` environment variables between runs so the recorded
+conditions remain comparable.
 
 ## ⚖️ Disclaimer
 
