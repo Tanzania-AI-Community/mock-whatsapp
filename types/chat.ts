@@ -18,6 +18,10 @@ export interface Message {
   timestamp?: number
   status?: "sending" | "sent" | "error"
   isTemp?: boolean // Flag for temporary messages
+  audioUrl?: string
+  audioDurationSeconds?: number
+  transcriptionProvider?: string
+  transcriptionModel?: string
 }
 
 // User state definitions from Python schema
