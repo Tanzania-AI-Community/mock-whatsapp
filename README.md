@@ -18,7 +18,7 @@ This project provides a sandbox environment that allows developers to:
 ## ✨ Features
 
 - **Real-time messaging**: Send and receive messages with persistent storage
-- **Audio testing**: Record, preview, and send voice notes for transcription
+- **Audio testing**: Record and send voice notes for transcription
 - **WhatsApp-like UI**: Familiar interface mimicking WhatsApp Web
 - **Message status indicators**: "Sending", "Sent", and "Error" states
 - **Temporary message handling**: Optimistic updates with server reconciliation
@@ -72,9 +72,12 @@ For Twiga audio testing, point `CHATBOT_CALLBACK_URL` to Twiga's `/devhooks`
 endpoint and enable `MOCK_WHATSAPP=True` in Twiga. Configure the provider and
 model in Twiga's `.env`; the mock interface only reports what the backend used.
 
-Click the microphone, allow browser access, record for up to two minutes, then
-stop. Listen to the preview and either delete it or send it. The interface shows
-upload/transcription progress, the provider/model used, and total request time.
+Click the microphone, allow browser access, and record for up to two minutes.
+The recording bar shows a live waveform and timer. Select Send to stop and send
+the voice note immediately, or select Delete to cancel it. The sent message shows
+temporary audio playback, its transcript, and the provider/model used. Audio
+playback lasts only for the current browser session because Twiga does not yet
+store audio files.
 Development runs save test metadata and the latest transcript in browser local
 storage. Use **Download audio test results** in the chat menu to export it.
 
