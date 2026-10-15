@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { Database, Loader2, Mic, Send, Square, Trash2 } from "lucide-react"
+import { Database, Loader2, Mic, Send, Trash2 } from "lucide-react"
 
 import { Button } from "./ui/button"
 import { Input } from "./ui/input"
@@ -8,7 +8,7 @@ const MAX_RECORDING_SECONDS = 120
 
 interface ChatInputProps {
   onSendMessage: (message: string) => void
-  onSendAudio: (file: File) => Promise<void>
+  onSendAudio: (file: File, durationSeconds: number) => Promise<void>
   audioStatus?: string | null
   audioError?: string | null
   disabled?: boolean
@@ -24,46 +24,42 @@ export const ChatInput = ({
   placeholder = "Type a message...",
 }: ChatInputProps) => {
   const [message, setMessage] = useState("")
-  const [isSendingAudio, setIsSendingAudio] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
+  const [isSendingAudio, setIsSendingAudio] = useState(false)
   const [recordingSeconds, setRecordingSeconds] = useState(0)
-  const [recording, setRecording] = useState<File | null>(null)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [recordingError, setRecordingError] = useState<string | null>(null)
-  const audioInputRef = useRef<HTMLInputElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const chunksRef = useRef<Blob[]>([])
+  const shouldSendRef = useRef(false)
+  const durationRef = useRef(0)
+
+  useEffect(() => {
+    durationRef.current = recordingSeconds
+  }, [recordingSeconds])
 
   useEffect(() => {
     if (!isRecording) return
     const interval = window.setInterval(() => {
       setRecordingSeconds((seconds) => {
-        if (seconds + 1 >= MAX_RECORDING_SECONDS)
+        const next = seconds + 1
+        if (next >= MAX_RECORDING_SECONDS) {
+          shouldSendRef.current = true
           mediaRecorderRef.current?.stop()
-        return seconds + 1
+        }
+        return next
       })
     }, 1000)
     return () => window.clearInterval(interval)
   }, [isRecording])
 
   useEffect(() => {
-    return () => {
-      streamRef.current?.getTracks().forEach((track) => track.stop())
-      if (previewUrl) URL.revokeObjectURL(previewUrl)
-    }
-  }, [previewUrl])
+    return () => streamRef.current?.getTracks().forEach((track) => track.stop())
+  }, [])
 
-  const clearRecording = () => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl)
-    setPreviewUrl(null)
-    setRecording(null)
-    setRecordingSeconds(0)
-  }
-
-  const prepareRecording = (file: File) => {
-    clearRecording()
-    setRecording(file)
-    setPreviewUrl(URL.createObjectURL(file))
+  const stopStream = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
   }
 
   const handleSubmit = (event: React.FormEvent) => {
@@ -74,50 +70,52 @@ export const ChatInput = ({
     }
   }
 
-  const handleAudioChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    event.target.value = ""
-    if (file && !disabled) prepareRecording(file)
-  }
-
-  const handleRecord = async () => {
-    if (isRecording) {
-      mediaRecorderRef.current?.stop()
-      return
-    }
+  const startRecording = async () => {
     if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
-      audioInputRef.current?.click()
+      setRecordingError("This browser does not support voice recording.")
       return
     }
 
     try {
       setRecordingError(null)
-      clearRecording()
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const recorder = new MediaRecorder(stream)
-      const chunks: Blob[] = []
-
       streamRef.current = stream
       mediaRecorderRef.current = recorder
+      chunksRef.current = []
+      shouldSendRef.current = false
+      setRecordingSeconds(0)
+
       recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunks.push(event.data)
+        if (event.data.size > 0) chunksRef.current.push(event.data)
       }
-      recorder.onstop = () => {
+      recorder.onstop = async () => {
+        const shouldSend = shouldSendRef.current
+        const duration = durationRef.current
         setIsRecording(false)
-        stream.getTracks().forEach((track) => track.stop())
-        streamRef.current = null
-        const blob = new Blob(chunks, { type: recorder.mimeType })
-        if (blob.size === 0) return
+        stopStream()
+        if (!shouldSend) return
+
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType })
+        if (blob.size === 0) {
+          setRecordingError("No audio was captured. Please try again.")
+          return
+        }
         const extension = recorder.mimeType.includes("mp4") ? "m4a" : "webm"
-        prepareRecording(
-          new File([blob], `voice-message.${extension}`, {
-            type: recorder.mimeType,
-          })
-        )
+        setIsSendingAudio(true)
+        try {
+          await onSendAudio(
+            new File([blob], `voice-message.${extension}`, {
+              type: recorder.mimeType,
+            }),
+            duration
+          )
+        } finally {
+          setIsSendingAudio(false)
+        }
       }
 
       recorder.start()
-      setRecordingSeconds(0)
       setIsRecording(true)
     } catch (error) {
       console.error("Unable to access microphone:", error)
@@ -127,134 +125,120 @@ export const ChatInput = ({
     }
   }
 
-  const sendRecording = async () => {
-    if (!recording) return
-    setIsSendingAudio(true)
-    try {
-      await onSendAudio(recording)
-      clearRecording()
-    } finally {
-      setIsSendingAudio(false)
-    }
+  const finishRecording = (send: boolean) => {
+    shouldSendRef.current = send
+    mediaRecorderRef.current?.stop()
   }
 
   const formattedTime = `${String(Math.floor(recordingSeconds / 60)).padStart(2, "0")}:${String(recordingSeconds % 60).padStart(2, "0")}`
+
   return (
     <div className="space-y-2">
-      {(isRecording || recording) && (
-        <div className="flex items-center gap-2 rounded-md bg-muted p-2">
-          {isRecording ? (
-            <>
-              <span className="size-2 animate-pulse rounded-full bg-red-600" />
-              <span className="text-sm font-medium">
-                Recording {formattedTime}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                2:00 maximum
-              </span>
-              <Button
-                type="button"
-                size="sm"
-                className="ml-auto"
-                onClick={() => mediaRecorderRef.current?.stop()}
-              >
-                <Square className="mr-1 size-3 fill-current" /> Stop
-              </Button>
-            </>
-          ) : (
-            <>
-              {previewUrl && (
-                <audio
-                  src={previewUrl}
-                  controls
-                  className="h-8 min-w-0 flex-1"
-                />
+      <form
+        onSubmit={handleSubmit}
+        className="flex min-h-11 items-center gap-2"
+      >
+        {disabled && (
+          <div className="flex items-center rounded-full bg-red-100 px-2 py-1 text-xs text-red-800">
+            <Database className="mr-1 size-3" /> Offline
+          </div>
+        )}
+
+        {isRecording ? (
+          <div className="flex min-w-0 flex-1 items-center gap-3 rounded-full bg-muted px-3 py-2">
+            <span className="size-2 shrink-0 animate-pulse rounded-full bg-red-500" />
+            <span className="min-w-11 text-sm font-medium tabular-nums">
+              {formattedTime}
+            </span>
+            <div
+              className="flex h-5 flex-1 items-center justify-center gap-1 overflow-hidden"
+              aria-hidden="true"
+            >
+              {[10, 18, 12, 20, 14, 8, 17, 11, 19, 13, 7, 16, 10, 18].map(
+                (height, index) => (
+                  <span
+                    key={index}
+                    className="w-1 shrink-0 rounded-full bg-primary/55"
+                    style={{ height }}
+                  />
+                )
               )}
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={clearRecording}
-                aria-label="Cancel recording"
-              >
-                <Trash2 className="size-4" />
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                disabled={isSendingAudio}
-                onClick={() => void sendRecording()}
-              >
-                {isSendingAudio ? (
-                  <Loader2 className="mr-1 size-4 animate-spin" />
-                ) : (
-                  <Send className="mr-1 size-4" />
-                )}
-                Send
-              </Button>
-            </>
-          )}
-        </div>
-      )}
+            </div>
+            <span className="text-xs text-muted-foreground">2:00 max</span>
+          </div>
+        ) : (
+          <Input
+            value={message}
+            onChange={(event) => setMessage(event.target.value)}
+            placeholder={placeholder}
+            disabled={disabled || isSendingAudio}
+            className={disabled ? "flex-1 bg-gray-100 text-gray-500" : "flex-1"}
+          />
+        )}
+
+        {isRecording ? (
+          <>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => finishRecording(false)}
+              aria-label="Cancel recording"
+              title="Cancel recording"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+            <Button
+              type="button"
+              size="icon"
+              onClick={() => finishRecording(true)}
+              aria-label="Send voice message"
+              title="Send voice message"
+            >
+              <Send className="size-4" />
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              disabled={disabled || isSendingAudio}
+              onClick={() => void startRecording()}
+              aria-label="Record voice message"
+              title="Record voice message"
+            >
+              {isSendingAudio ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Mic className="size-4" />
+              )}
+            </Button>
+            <Button
+              type="submit"
+              size="icon"
+              disabled={disabled || !message.trim() || isSendingAudio}
+              className="shrink-0 transition-all duration-200"
+            >
+              <Send className="size-4" />
+            </Button>
+          </>
+        )}
+      </form>
 
       {(audioStatus || audioError || recordingError) && (
         <p
           className={
             audioError || recordingError
-              ? "text-xs text-red-600"
-              : "text-xs text-muted-foreground"
+              ? "px-2 text-xs text-red-600"
+              : "px-2 text-xs text-muted-foreground"
           }
           role="status"
         >
           {recordingError ?? audioError ?? audioStatus}
         </p>
       )}
-
-      <form onSubmit={handleSubmit} className="flex items-center gap-2">
-        {disabled && (
-          <div className="flex items-center rounded-full bg-red-100 px-2 py-1 text-xs text-red-800">
-            <Database className="mr-1 size-3" /> Offline
-          </div>
-        )}
-        <Input
-          value={message}
-          onChange={(event) => setMessage(event.target.value)}
-          placeholder={placeholder}
-          disabled={disabled}
-          className={disabled ? "flex-1 bg-gray-100 text-gray-500" : "flex-1"}
-        />
-        <input
-          ref={audioInputRef}
-          type="file"
-          accept="audio/*,.m4a"
-          className="hidden"
-          onChange={handleAudioChange}
-        />
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          disabled={disabled || isSendingAudio || !!recording}
-          onClick={() => void handleRecord()}
-          aria-label={isRecording ? "Stop recording" : "Record voice message"}
-          title={isRecording ? "Stop recording" : "Record voice message"}
-          className={isRecording ? "shrink-0 text-red-600" : "shrink-0"}
-        >
-          {isRecording ? (
-            <Square className="size-4 fill-current" />
-          ) : (
-            <Mic className="size-4" />
-          )}
-        </Button>
-        <Button
-          type="submit"
-          size="icon"
-          disabled={disabled || !message.trim()}
-          className="shrink-0 transition-all duration-200"
-        >
-          <Send className="size-4" />
-        </Button>
-      </form>
     </div>
   )
 }

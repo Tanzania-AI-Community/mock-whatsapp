@@ -48,6 +48,8 @@ export default function ClientChatInterface({
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true) // Add this state
   const [audioStatus, setAudioStatus] = useState<string | null>(null)
   const [audioError, setAudioError] = useState<string | null>(null)
+  const audioMessagesRef = useRef(new Map<Message["id"], Partial<Message>>())
+  const audioUrlsRef = useRef(new Set<string>())
 
   // Fetch messages using the server action
   const fetchMessages = async () => {
@@ -64,7 +66,12 @@ export default function ClientChatInterface({
       }
 
       if (response.messages) {
-        handleNewMessages(response.messages)
+        handleNewMessages(
+          response.messages.map((message) => ({
+            ...message,
+            ...audioMessagesRef.current.get(message.id),
+          }))
+        )
       }
       return response
     } catch (error) {
@@ -152,6 +159,12 @@ export default function ClientChatInterface({
       setShouldScrollToBottom(true)
     }
   }, [initialMessages, messages.length])
+
+  useEffect(() => {
+    return () => {
+      audioUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
+    }
+  }, [])
 
   const handleRefresh = () => {
     // Re-enable polling if it was suspended
@@ -247,7 +260,7 @@ export default function ClientChatInterface({
       })
   }
 
-  const handleSendAudio = async (file: File) => {
+  const handleSendAudio = async (file: File, durationSeconds: number) => {
     if (connectionFailed) return
     if (file.size > 16 * 1024 * 1024) {
       setAudioError("Audio files must be 16 MB or smaller.")
@@ -259,14 +272,18 @@ export default function ClientChatInterface({
     setUserJustSentMessage(true)
     setShouldScrollToBottom(true)
 
+    const audioUrl = URL.createObjectURL(file)
+    audioUrlsRef.current.add(audioUrl)
     const tempMessage: Message = {
       id: Date.now(),
       role: "user",
-      content: `Voice message: ${file.name}`,
+      content: "Transcribing voice message…",
       created_at: new Date(),
       timestamp: Math.floor(Date.now() / 1000),
       status: "sending",
       isTemp: true,
+      audioUrl,
+      audioDurationSeconds: durationSeconds,
     }
 
     setTempMessages((prev) => [...prev, tempMessage])
@@ -289,9 +306,24 @@ export default function ClientChatInterface({
       const provider = result.transcription?.provider ?? "unknown"
       const model = result.transcription?.model ?? "unknown"
       const refreshed = await fetchMessages()
-      const transcript = refreshed?.messages.find(
+      const transcriptMessage = refreshed?.messages.find(
         (message) => message.role === "user"
-      )?.content
+      )
+      const transcript = transcriptMessage?.content
+      if (transcriptMessage) {
+        audioMessagesRef.current.set(transcriptMessage.id, {
+          audioUrl,
+          audioDurationSeconds: durationSeconds,
+          transcriptionProvider: provider,
+          transcriptionModel: model,
+        })
+        handleNewMessages(
+          (refreshed?.messages ?? []).map((message) => ({
+            ...message,
+            ...audioMessagesRef.current.get(message.id),
+          }))
+        )
+      }
       const experiment = {
         recordedAt: new Date().toISOString(),
         provider,
@@ -313,9 +345,7 @@ export default function ClientChatInterface({
       } catch (storageError) {
         console.error("Unable to save audio experiment:", storageError)
       }
-      setAudioStatus(
-        `Sent using ${provider}/${model} in ${(latencyMs / 1000).toFixed(1)}s`
-      )
+      setAudioStatus(null)
     } catch (error) {
       console.error("Error sending audio:", error)
       setAudioStatus(null)
