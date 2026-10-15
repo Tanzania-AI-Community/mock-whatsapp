@@ -5,6 +5,7 @@ import { Button } from "./ui/button"
 import { Input } from "./ui/input"
 
 const MAX_RECORDING_SECONDS = 120
+const WAVEFORM_BARS = 18
 
 interface ChatInputProps {
   onSendMessage: (message: string) => void
@@ -28,11 +29,48 @@ export const ChatInput = ({
   const [isSendingAudio, setIsSendingAudio] = useState(false)
   const [recordingSeconds, setRecordingSeconds] = useState(0)
   const [recordingError, setRecordingError] = useState<string | null>(null)
+  const [waveform, setWaveform] = useState<number[]>(
+    Array.from({ length: WAVEFORM_BARS }, () => 0.12)
+  )
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const shouldSendRef = useRef(false)
   const durationRef = useRef(0)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const animationFrameRef = useRef<number | null>(null)
+
+  const stopWaveform = () => {
+    if (animationFrameRef.current !== null) {
+      cancelAnimationFrame(animationFrameRef.current)
+      animationFrameRef.current = null
+    }
+    void audioContextRef.current?.close()
+    audioContextRef.current = null
+    setWaveform(Array.from({ length: WAVEFORM_BARS }, () => 0.12))
+  }
+
+  const startWaveform = (stream: MediaStream) => {
+    const audioContext = new AudioContext()
+    const analyser = audioContext.createAnalyser()
+    analyser.fftSize = 64
+    analyser.smoothingTimeConstant = 0.72
+    audioContext.createMediaStreamSource(stream).connect(analyser)
+    audioContextRef.current = audioContext
+    const frequencies = new Uint8Array(analyser.frequencyBinCount)
+
+    const update = () => {
+      analyser.getByteFrequencyData(frequencies)
+      setWaveform(
+        Array.from({ length: WAVEFORM_BARS }, (_, index) => {
+          const bin = Math.floor((index / WAVEFORM_BARS) * frequencies.length)
+          return Math.min(1, 0.12 + frequencies[bin] / 150)
+        })
+      )
+      animationFrameRef.current = requestAnimationFrame(update)
+    }
+    update()
+  }
 
   useEffect(() => {
     durationRef.current = recordingSeconds
@@ -54,10 +92,17 @@ export const ChatInput = ({
   }, [isRecording])
 
   useEffect(() => {
-    return () => streamRef.current?.getTracks().forEach((track) => track.stop())
+    return () => {
+      streamRef.current?.getTracks().forEach((track) => track.stop())
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current)
+      }
+      void audioContextRef.current?.close()
+    }
   }, [])
 
   const stopStream = () => {
+    stopWaveform()
     streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
   }
@@ -81,6 +126,7 @@ export const ChatInput = ({
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const recorder = new MediaRecorder(stream)
       streamRef.current = stream
+      startWaveform(stream)
       mediaRecorderRef.current = recorder
       chunksRef.current = []
       shouldSendRef.current = false
@@ -119,6 +165,7 @@ export const ChatInput = ({
       setIsRecording(true)
     } catch (error) {
       console.error("Unable to access microphone:", error)
+      stopStream()
       setRecordingError(
         "Microphone access was denied. Allow access in the browser and try again."
       )
@@ -154,15 +201,13 @@ export const ChatInput = ({
               className="flex h-5 flex-1 items-center justify-center gap-1 overflow-hidden"
               aria-hidden="true"
             >
-              {[10, 18, 12, 20, 14, 8, 17, 11, 19, 13, 7, 16, 10, 18].map(
-                (height, index) => (
-                  <span
-                    key={index}
-                    className="w-1 shrink-0 rounded-full bg-primary/55"
-                    style={{ height }}
-                  />
-                )
-              )}
+              {waveform.map((level, index) => (
+                <span
+                  key={index}
+                  className="h-5 w-1 shrink-0 origin-center rounded-full bg-primary/65 transition-transform duration-100 ease-linear motion-reduce:transition-none"
+                  style={{ transform: `scaleY(${level})` }}
+                />
+              ))}
             </div>
             <span className="text-xs text-muted-foreground">2:00 max</span>
           </div>
