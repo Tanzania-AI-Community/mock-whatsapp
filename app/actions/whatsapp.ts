@@ -10,7 +10,6 @@ interface SendMessageProps {
 }
 
 const MAX_AUDIO_BYTES = 16 * 1024 * 1024
-
 async function sendWebhookMessage(
   message: Record<string, unknown>,
   recipientId: string
@@ -55,7 +54,17 @@ async function sendWebhookMessage(
   }
 
   revalidatePath("/")
-  return { success: true, data: await response.json() }
+  return {
+    success: true as const,
+    data: await response.json(),
+    transcription: {
+      provider: response.headers.get("x-audio-transcription-provider"),
+      model: response.headers.get("x-audio-transcription-model"),
+      latencyMs: Number(
+        response.headers.get("x-audio-transcription-latency-ms") ?? 0
+      ),
+    },
+  }
 }
 
 /**
@@ -78,7 +87,7 @@ export async function sendWhatsAppMessage({
     )
   } catch (error) {
     console.error("Error sending WhatsApp message:", error)
-    return { success: false, error: String(error) }
+    return { success: false as const, error: String(error) }
   }
 }
 
@@ -94,7 +103,6 @@ export async function sendWhatsAppAudio(
     if (file.size > MAX_AUDIO_BYTES) {
       throw new Error("Audio files must be 16 MB or smaller")
     }
-
     const audioBase64 = Buffer.from(await file.arrayBuffer()).toString("base64")
 
     return await sendWebhookMessage(
@@ -114,6 +122,6 @@ export async function sendWhatsAppAudio(
     )
   } catch (error) {
     console.error("Error sending WhatsApp audio:", error)
-    return { success: false, error: String(error) }
+    return { success: false as const, error: String(error) }
   }
 }

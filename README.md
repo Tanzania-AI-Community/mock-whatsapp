@@ -18,7 +18,7 @@ This project provides a sandbox environment that allows developers to:
 ## ✨ Features
 
 - **Real-time messaging**: Send and receive messages with persistent storage
-- **Audio testing**: Upload voice-note files to test chatbot transcription
+- **Audio testing**: Record, preview, and send voice notes for transcription
 - **WhatsApp-like UI**: Familiar interface mimicking WhatsApp Web
 - **Message status indicators**: "Sending", "Sent", and "Error" states
 - **Temporary message handling**: Optimistic updates with server reconciliation
@@ -68,7 +68,28 @@ To connect your chatbot:
 2. Ensure your chatbot responds with the expected format (see API documentation)
 3. Use the interface to send messages and receive responses
 
-For Twiga audio testing, point `CHATBOT_CALLBACK_URL` to Twiga's `/devhooks` endpoint and enable `MOCK_WHATSAPP=True` in Twiga. Use the audio button beside the message field to upload an audio file up to 16 MB.
+For Twiga audio testing, point `CHATBOT_CALLBACK_URL` to Twiga's `/devhooks`
+endpoint and enable `MOCK_WHATSAPP=True` in Twiga. Configure the provider and
+model in Twiga's `.env`; the mock interface only reports what the backend used.
+
+Click the microphone, allow browser access, record for up to two minutes, then
+stop. Listen to the preview and either delete it or send it. The interface shows
+upload/transcription progress, the provider/model used, and total request time.
+Development runs save test metadata and the latest transcript in browser local
+storage. Use **Download audio test results** in the chat menu to export it.
+
+For a useful comparison, record the same script for each backend configuration:
+
+1. Clear Swahili.
+2. Clear English.
+3. Mixed Swahili and English.
+4. Background noise or a weak microphone.
+5. Fast, quiet, and accent-varied speech.
+6. Education-specific names and terminology.
+
+Change only Twiga's `AUDIO_TRANSCRIPTION_PROVIDER` and
+`AUDIO_TRANSCRIPTION_MODEL` environment variables between runs so the recorded
+conditions remain comparable.
 
 ## ⚖️ Disclaimer
 

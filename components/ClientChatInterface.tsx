@@ -46,6 +46,8 @@ export default function ClientChatInterface({
   const prevMessagesLengthRef = useRef(initialMessages.length)
   const [userJustSentMessage, setUserJustSentMessage] = useState(false)
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true) // Add this state
+  const [audioStatus, setAudioStatus] = useState<string | null>(null)
+  const [audioError, setAudioError] = useState<string | null>(null)
 
   // Fetch messages using the server action
   const fetchMessages = async () => {
@@ -58,12 +60,13 @@ export default function ClientChatInterface({
 
       if (response.error) {
         handleDatabaseError(response.error)
-        return
+        return response
       }
 
       if (response.messages) {
         handleNewMessages(response.messages)
       }
+      return response
     } catch (error) {
       console.error("Error in fetchMessages:", error)
       setDbError("Failed to fetch messages. Please try again.")
@@ -163,6 +166,18 @@ export default function ClientChatInterface({
     setTempMessages([])
   }
 
+  const handleExportAudioResults = () => {
+    const results = localStorage.getItem("twiga-audio-experiments") ?? "[]"
+    const url = URL.createObjectURL(
+      new Blob([results], { type: "application/json" })
+    )
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `twiga-audio-results-${new Date().toISOString().slice(0, 10)}.json`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
   const handleSendMessage = (text: string) => {
     // If we have a connection error, prevent sending
     if (connectionFailed) {
@@ -235,10 +250,12 @@ export default function ClientChatInterface({
   const handleSendAudio = async (file: File) => {
     if (connectionFailed) return
     if (file.size > 16 * 1024 * 1024) {
-      setDbError("Audio files must be 16 MB or smaller.")
-      return
+      setAudioError("Audio files must be 16 MB or smaller.")
+      throw new Error("Audio file is too large")
     }
 
+    setAudioError(null)
+    setAudioStatus("Uploading and transcribing voice message…")
     setUserJustSentMessage(true)
     setShouldScrollToBottom(true)
 
@@ -255,6 +272,7 @@ export default function ClientChatInterface({
     setTempMessages((prev) => [...prev, tempMessage])
     const formData = new FormData()
     formData.append("audio", file)
+    const startedAt = performance.now()
 
     try {
       const result = await sendWhatsAppAudio(formData)
@@ -267,9 +285,43 @@ export default function ClientChatInterface({
       setTempMessages((prev) =>
         prev.filter((message) => message.id !== tempMessage.id)
       )
-      await fetchMessages()
+      const latencyMs = Math.round(performance.now() - startedAt)
+      const provider = result.transcription?.provider ?? "unknown"
+      const model = result.transcription?.model ?? "unknown"
+      const refreshed = await fetchMessages()
+      const transcript = refreshed?.messages.find(
+        (message) => message.role === "user"
+      )?.content
+      const experiment = {
+        recordedAt: new Date().toISOString(),
+        provider,
+        model,
+        filename: file.name,
+        bytes: file.size,
+        requestLatencyMs: latencyMs,
+        transcriptionLatencyMs: result.transcription?.latencyMs ?? null,
+        transcript: transcript ?? null,
+      }
+      try {
+        const previous = JSON.parse(
+          localStorage.getItem("twiga-audio-experiments") ?? "[]"
+        ) as unknown[]
+        localStorage.setItem(
+          "twiga-audio-experiments",
+          JSON.stringify([...previous, experiment])
+        )
+      } catch (storageError) {
+        console.error("Unable to save audio experiment:", storageError)
+      }
+      setAudioStatus(
+        `Sent using ${provider}/${model} in ${(latencyMs / 1000).toFixed(1)}s`
+      )
     } catch (error) {
       console.error("Error sending audio:", error)
+      setAudioStatus(null)
+      setAudioError(
+        error instanceof Error ? error.message : "Voice transcription failed."
+      )
       setTempMessages((prev) =>
         prev.map((message) =>
           message.id === tempMessage.id
@@ -282,6 +334,7 @@ export default function ClientChatInterface({
           prev.filter((message) => message.id !== tempMessage.id)
         )
       }, 5000)
+      throw error
     }
   }
 
@@ -343,6 +396,11 @@ export default function ClientChatInterface({
             <DropdownMenuItem onClick={handleClearChat}>
               Clear chat
             </DropdownMenuItem>
+            {process.env.NODE_ENV !== "production" && (
+              <DropdownMenuItem onClick={handleExportAudioResults}>
+                Download audio test results
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -408,6 +466,8 @@ export default function ClientChatInterface({
         <ChatInput
           onSendMessage={handleSendMessage}
           onSendAudio={handleSendAudio}
+          audioStatus={audioStatus}
+          audioError={audioError}
           disabled={connectionFailed}
           placeholder={
             connectionFailed
