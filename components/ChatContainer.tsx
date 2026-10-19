@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils"
 
 import { ChatMessage } from "./ChatMessage"
 import { DateDivider } from "./DateDivider" // Import our new component
+import { TypingIndicator } from "./TypingIndicator"
 import { Button } from "./ui/button"
 
 interface ChatContainerProps {
@@ -14,6 +15,7 @@ interface ChatContainerProps {
   shouldScrollToBottom?: boolean
   onScrollComplete?: () => void
   onScrollStateChange?: (isAtBottom: boolean) => void
+  isTyping?: boolean
 }
 
 export const ChatContainer = ({
@@ -21,6 +23,7 @@ export const ChatContainer = ({
   shouldScrollToBottom = false,
   onScrollComplete,
   onScrollStateChange,
+  isTyping = false,
 }: ChatContainerProps) => {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -193,6 +196,14 @@ export const ChatContainer = ({
     prevMessagesLengthRef.current = messages.length
   }, [messages, shouldScrollToBottom, isAutoScrollEnabled, scrollToBottom])
 
+  const wasTypingRef = useRef(isTyping)
+  useEffect(() => {
+    if (isTyping && !wasTypingRef.current && isAutoScrollEnabled) {
+      scrollToBottom(true)
+    }
+    wasTypingRef.current = isTyping
+  }, [isTyping, isAutoScrollEnabled, scrollToBottom])
+
   // Force a scroll position check when component mounts
   useEffect(() => {
     // Only run this effect if we have messages
@@ -210,7 +221,7 @@ export const ChatContainer = ({
   }, [])
 
   // If no messages, render the empty state
-  if (messages.length === 0) {
+  if (messages.length === 0 && !isTyping) {
     return null
   }
 
@@ -234,6 +245,7 @@ export const ChatContainer = ({
               ))}
             </div>
           ))}
+          {isTyping && <TypingIndicator />}
           {/* This div serves as a scroll anchor with increased height for better targeting */}
           <div ref={messagesEndRef} className="h-4 scroll-mt-4" />
         </div>
