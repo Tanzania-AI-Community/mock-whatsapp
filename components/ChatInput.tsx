@@ -6,14 +6,12 @@ import { Input } from "./ui/input"
 
 interface ChatInputProps {
   onSendMessage: (message: string) => void
-  isLoading?: boolean
   disabled?: boolean
   placeholder?: string
 }
 
 export const ChatInput = ({
   onSendMessage,
-  isLoading,
   disabled = false,
   placeholder = "Type a message...",
 }: ChatInputProps) => {
@@ -21,7 +19,7 @@ export const ChatInput = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (message.trim() && !isLoading && !disabled) {
+    if (message.trim() && !disabled) {
       onSendMessage(message.trim())
       setMessage("")
     }
@@ -43,12 +41,12 @@ export const ChatInput = ({
         onChange={(e) => setMessage(e.target.value)}
         placeholder={placeholder}
         className={inputClasses}
-        disabled={isLoading || disabled}
+        disabled={disabled}
       />
       <Button
         type="submit"
         size="icon"
-        disabled={isLoading || disabled || !message.trim()}
+        disabled={disabled || !message.trim()}
         className="shrink-0 transition-all duration-200"
       >
         <Send className="size-4" />
