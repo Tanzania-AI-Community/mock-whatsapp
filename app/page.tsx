@@ -2,11 +2,10 @@ import { Suspense } from "react"
 import { Loader2 } from "lucide-react"
 
 import { getAppMode, parseObservedUserId } from "@/lib/appMode"
+import { getMessages } from "@/lib/messages"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import ClientChatInterface from "@/components/ClientChatInterface"
-
-import { getMessages } from "./actions/messages"
 
 interface HomeProps {
   searchParams?: Promise<{
@@ -101,6 +100,7 @@ export default async function Home({ searchParams }: HomeProps) {
       // TODO Add a skeleton loader here
     >
       <ClientChatInterface
+        key={appMode === "observe" ? observedUserId : "chat"}
         initialMessages={messages}
         isInitialLoading={!!error}
         mode={appMode}

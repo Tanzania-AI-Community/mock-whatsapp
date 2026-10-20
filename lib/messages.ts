@@ -1,12 +1,11 @@
-"use server"
-
 import { db } from "@/db"
+
+import { type Message } from "@/types/chat"
 import {
   buildMessagesFindManyOptions,
   formatDbMessage,
   type GetMessagesOptions,
 } from "@/lib/messageQuery"
-import { type Message } from "@/types/chat"
 
 /**
  * Helper function to check if an error is a connection error

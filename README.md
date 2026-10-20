@@ -67,6 +67,14 @@ only loads messages from the `messages` table that:
 - have `is_present_in_conversation = true`
 - have a `user` or `assistant` role
 
+The observer polls the same selected user every two seconds. Use **Change observed
+user** to return to the lookup form. The server rejects missing or invalid user
+IDs in observe-mode message requests and blocks inbound sends with HTTP 403.
+
+Both development commands bind to `127.0.0.1`. Observe mode is an internal
+development tool without authentication; keep it on a trusted local machine.
+The connected database must already contain the `messages.user_id` column.
+
 ## 📝 Configuration
 
 ### Chatbot Integration
