@@ -6,7 +6,7 @@
   "author": "Fredy German Mgimba",
   "scripts": {
     "clean": "rimraf --glob **/node_modules **/dist **/.next pnpm-lock.yaml **/.tsbuildinfo",
-    "build": "next build && cp -r public .next/standalone/ && cp -r .next/static .next/standalone/.next/",
+    "build": "next build && if [ -d public ]; then cp -r public .next/standalone/; fi && cp -r .next/static .next/standalone/.next/",
     "dev": "next dev -H 127.0.0.1",
     "observe": "APP_MODE=observe next dev -H 127.0.0.1",
     "start": "cd .next/standalone && node server.js",

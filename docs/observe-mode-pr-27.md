@@ -16,7 +16,9 @@ Validation:
 - Frozen dependency install passed.
 - All 51 tests passed, including observe API scope and send-block regressions.
 - Lint and TypeScript passed.
-- Production build tested with observe mode and dummy local service URLs.
+- Production build compiled with observe mode and dummy local service URLs.
+  The packaging step initially failed because no public directory exists; the
+  build script now copies that optional directory only when present.
 - Formatting checked; corrected the existing provider import formatting issue.
 
 No database migration is included: the schema maps the existing external
