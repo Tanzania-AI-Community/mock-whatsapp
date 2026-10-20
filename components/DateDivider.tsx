@@ -11,7 +11,7 @@ function DateDividerComponent({ timestamp }: DateDividerProps) {
 
   return (
     <div className="flex justify-center self-center">
-      <div className="rounded-full bg-white px-4 py-1 text-sm text-muted-foreground shadow-sm">
+      <div className="rounded-full bg-white px-4 py-1 text-sm text-muted-foreground shadow-xs">
         {formattedDate}
       </div>
     </div>
