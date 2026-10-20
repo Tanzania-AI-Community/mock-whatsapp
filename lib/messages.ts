@@ -1,5 +1,3 @@
-"use server"
-
 import { db } from "@/db"
 
 import { type Message } from "@/types/chat"
@@ -33,6 +31,11 @@ export async function getMessages(limit: number = 100): Promise<{
 
     const dbMessages = await db.query.messages.findMany({
       limit,
+      where: (messages, { and, eq, or }) =>
+        and(
+          eq(messages.is_present_in_conversation, true),
+          or(eq(messages.role, "user"), eq(messages.role, "assistant"))
+        ),
       orderBy: (messages, { desc }) => [desc(messages.created_at)],
     })
 
