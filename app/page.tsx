@@ -1,9 +1,8 @@
 import { Suspense } from "react"
 import { Loader2 } from "lucide-react"
 
+import { getMessages } from "@/lib/messages"
 import ClientChatInterface from "@/components/ClientChatInterface"
-
-import { getMessages } from "./actions/messages"
 
 export default async function Home() {
   // Prefetch messages server-side

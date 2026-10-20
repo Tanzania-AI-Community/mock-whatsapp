@@ -11,8 +11,12 @@ import {
 } from "lucide-react"
 
 import type { Message } from "@/types/chat"
-import { shouldTriggerScroll } from "@/lib/messageUtils"
-import { deduplicateMessages } from "@/lib/utils"
+import {
+  excludeClearedMessages,
+  getLastMessageId,
+  reconcileTempMessages,
+  shouldTriggerScroll,
+} from "@/lib/messageUtils"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -22,8 +26,26 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { ChatContainer } from "@/components/ChatContainer"
 import { ChatInput } from "@/components/ChatInput"
-import { getMessages } from "@/app/actions/messages"
-import { sendWhatsAppMessage } from "@/app/actions/whatsapp"
+
+// Route handlers avoid the client-side Server Action queue
+async function requestMessages(): Promise<{
+  messages: Message[]
+  error?: string
+}> {
+  const response = await fetch("/api/messages", { cache: "no-store" })
+  return response.json()
+}
+
+async function postInboundMessage(
+  body: string
+): Promise<{ success: boolean; error?: string }> {
+  const response = await fetch("/api/inbound", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ body }),
+  })
+  return response.json()
+}
 
 interface ClientChatInterfaceProps {
   initialMessages: Message[]
@@ -40,22 +62,29 @@ export default function ClientChatInterface({
   const [dbError, setDbError] = useState<string | null>(null)
   const [connectionFailed, setConnectionFailed] = useState(false)
   const [tempMessages, setTempMessages] = useState<Message[]>([])
-  const [sendingMessage, setSendingMessage] = useState(false)
+  const [pendingInboundCount, setPendingInboundCount] = useState(0)
   const [shouldScrollToBottom, setShouldScrollToBottom] = useState(true)
   const [isPollingSuspended, setIsPollingSuspended] = useState(false)
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
-  const messageContentRef = useRef<string | null>(null)
+  const isFetchingRef = useRef(false)
+  const latestRequestIdRef = useRef(0)
+  // A ref, because the polling interval keeps its first render's closure
+  const clearedThroughIdRef = useRef<number | null>(null)
   const prevMessagesLengthRef = useRef(initialMessages.length)
   const [userJustSentMessage, setUserJustSentMessage] = useState(false)
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true) // Add this state
 
-  // Fetch messages using the server action
-  const fetchMessages = async () => {
-    if (isPollingSuspended) return
+  // Only the newest request's response is applied, so a forced refresh can't be
+  // overwritten by an older poll
+  const fetchMessages = async ({ force = false } = {}) => {
+    if (isPollingSuspended || (isFetchingRef.current && !force)) return
+    const requestId = ++latestRequestIdRef.current
+    isFetchingRef.current = true
 
     try {
       setIsLoading(true)
-      const response = await getMessages()
+      const response = await requestMessages()
+      if (requestId !== latestRequestIdRef.current) return
       setIsLoading(false)
 
       if (response.error) {
@@ -67,9 +96,14 @@ export default function ClientChatInterface({
         handleNewMessages(response.messages)
       }
     } catch (error) {
+      if (requestId !== latestRequestIdRef.current) return
       console.error("Error in fetchMessages:", error)
       setDbError("Failed to fetch messages. Please try again.")
       setIsLoading(false)
+    } finally {
+      if (requestId === latestRequestIdRef.current) {
+        isFetchingRef.current = false
+      }
     }
   }
 
@@ -88,10 +122,13 @@ export default function ClientChatInterface({
   }
 
   // Helper function to handle new messages
-  const handleNewMessages = (newMessages: Message[]) => {
-    if (tempMessages.length > 0) {
-      handleTempMessages(newMessages)
-    }
+  const handleNewMessages = (fetchedMessages: Message[]) => {
+    const newMessages = excludeClearedMessages(
+      fetchedMessages,
+      clearedThroughIdRef.current
+    )
+
+    setTempMessages((pending) => reconcileTempMessages(pending, newMessages))
 
     const shouldScroll = shouldTriggerScroll(
       newMessages,
@@ -111,24 +148,6 @@ export default function ClientChatInterface({
     setConnectionFailed(false)
   }
 
-  // Helper function to handle temporary messages
-  const handleTempMessages = (newMessages: Message[]) => {
-    const remainingTempMessages = deduplicateMessages(newMessages, tempMessages)
-    setTempMessages(remainingTempMessages)
-
-    if (messageContentRef.current) {
-      const sentMessageExists = newMessages.some(
-        (dbMsg) =>
-          dbMsg.role === "user" && dbMsg.content === messageContentRef.current
-      )
-
-      if (sentMessageExists) {
-        setSendingMessage(false)
-        messageContentRef.current = null
-      }
-    }
-  }
-
   // Set up polling
   useEffect(() => {
     // Initial fetch on mount
@@ -136,11 +155,9 @@ export default function ClientChatInterface({
 
     // Only set up polling if not suspended
     if (!isPollingSuspended) {
-      const interval = sendingMessage ? 1000 : 2000
-
       pollingIntervalRef.current = setInterval(() => {
         fetchMessages()
-      }, interval)
+      }, 2000)
 
       return () => {
         if (pollingIntervalRef.current) {
@@ -155,13 +172,17 @@ export default function ClientChatInterface({
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sendingMessage, isPollingSuspended])
+  }, [isPollingSuspended])
 
   // When initial messages are updated from props
   useEffect(() => {
-    if (initialMessages.length > 0 && messages.length === 0) {
-      setMessages(initialMessages)
-      prevMessagesLengthRef.current = initialMessages.length
+    const visibleInitialMessages = excludeClearedMessages(
+      initialMessages,
+      clearedThroughIdRef.current
+    )
+    if (visibleInitialMessages.length > 0 && messages.length === 0) {
+      setMessages(visibleInitialMessages)
+      prevMessagesLengthRef.current = visibleInitialMessages.length
       setShouldScrollToBottom(true)
     }
   }, [initialMessages, messages.length])
@@ -171,16 +192,24 @@ export default function ClientChatInterface({
     setIsPollingSuspended(false)
     setConnectionFailed(false)
     setShouldScrollToBottom(true)
-    fetchMessages()
+    void fetchMessages({ force: true })
   }
 
+  // Hides the conversation locally only; the messages stay in Twiga's database
   const handleClearChat = () => {
+    const lastMessageId = getLastMessageId(messages)
+    if (lastMessageId !== null) {
+      clearedThroughIdRef.current = Math.max(
+        lastMessageId,
+        clearedThroughIdRef.current ?? lastMessageId
+      )
+    }
+    prevMessagesLengthRef.current = 0
     setMessages([])
     setTempMessages([])
-    messageContentRef.current = null
   }
 
-  const handleSendMessage = async (text: string) => {
+  const handleSendMessage = (text: string) => {
     // If we have a connection error, prevent sending
     if (connectionFailed) {
       // Show a temporary error that sending is disabled
@@ -195,10 +224,6 @@ export default function ClientChatInterface({
       return
     }
 
-    if (sendingMessage) return
-
-    messageContentRef.current = text
-
     // Set flag that user just sent a message to ensure scroll
     setUserJustSentMessage(true)
 
@@ -206,61 +231,60 @@ export default function ClientChatInterface({
     setShouldScrollToBottom(true)
 
     const tempMessage: Message = {
-      id: Date.now(),
+      id: `temp-${crypto.randomUUID()}`,
       role: "user",
       content: text,
       created_at: new Date(),
       timestamp: Math.floor(Date.now() / 1000),
       status: "sending",
       isTemp: true,
+      sentAfterId:
+        getLastMessageId(messages) ?? clearedThroughIdRef.current ?? 0,
     }
 
     setTempMessages((prev) => [...prev, tempMessage])
-    setSendingMessage(true)
-
-    try {
-      const result = await sendWhatsAppMessage({ body: text })
-
-      if (!result.success) {
-        throw new Error("Failed to send message to WhatsApp API")
-      }
-
-      await fetchMessages()
-
-      setTempMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === tempMessage.id ? { ...msg, status: "sent" } : msg
-        )
-      )
-
-      setTimeout(() => {
-        setTempMessages((prev) =>
-          prev.filter((msg) => msg.id !== tempMessage.id)
-        )
-        if (messageContentRef.current === text) {
-          messageContentRef.current = null
+    setPendingInboundCount((count) => count + 1)
+    void postInboundMessage(text)
+      .then((result) => {
+        if (!result.success) {
+          throw new Error(
+            result.error ?? "Failed to send message to WhatsApp API"
+          )
         }
-        setSendingMessage(false)
-      }, 10000)
-    } catch (error) {
-      console.error("Error sending message:", error)
 
-      setTempMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === tempMessage.id ? { ...msg, status: "error" } : msg
-        )
-      )
-
-      setTimeout(() => {
         setTempMessages((prev) =>
-          prev.filter((msg) => msg.id !== tempMessage.id)
+          prev.map((msg) =>
+            msg.id === tempMessage.id ? { ...msg, status: "sent" } : msg
+          )
         )
-        if (messageContentRef.current === text) {
-          messageContentRef.current = null
-        }
-        setSendingMessage(false)
-      }, 5000)
-    }
+
+        setTimeout(() => {
+          setTempMessages((prev) =>
+            prev.filter((msg) => msg.id !== tempMessage.id)
+          )
+        }, 10000)
+
+        // Load the reply before the typing indicator hides
+        return fetchMessages({ force: true })
+      })
+      .catch((error) => {
+        console.error("Error sending message:", error)
+
+        setTempMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === tempMessage.id ? { ...msg, status: "error" } : msg
+          )
+        )
+
+        setTimeout(() => {
+          setTempMessages((prev) =>
+            prev.filter((msg) => msg.id !== tempMessage.id)
+          )
+        }, 5000)
+      })
+      .finally(() => {
+        setPendingInboundCount((count) => count - 1)
+      })
   }
 
   const handleScrollComplete = () => {
@@ -273,12 +297,9 @@ export default function ClientChatInterface({
     setIsAutoScrollEnabled(isAtBottom)
   }
 
-  // Filter to only show user, assistant messages and tool messages
+  // Filter to only show user and assistant messages.
   const filterAllowedRoles = (msgs: Message[]): Message[] => {
-    return msgs.filter(
-      (msg) =>
-        msg.role === "user" || msg.role === "assistant" || msg.role === "tool"
-    )
+    return msgs.filter((msg) => msg.role === "user" || msg.role === "assistant")
   }
 
   // Combine real and temporary messages for display, filtering out unwanted roles
@@ -287,6 +308,8 @@ export default function ClientChatInterface({
   const filteredTempMessages =
     tempMessages.length > 0 ? filterAllowedRoles(tempMessages) : []
   const combinedMessages = [...filteredMessages, ...filteredTempMessages]
+  const isTyping = pendingInboundCount > 0
+  const hasChatContent = combinedMessages.length > 0 || isTyping
 
   return (
     <div className="mx-auto flex h-screen min-w-[500px] max-w-2xl flex-col rounded-lg bg-primary-foreground shadow-lg">
@@ -354,12 +377,12 @@ export default function ClientChatInterface({
 
       {/* Chat area */}
       <div className="relative min-h-0 flex-1 overflow-hidden">
-        {isLoading && combinedMessages.length === 0 ? (
+        {isLoading && !hasChatContent ? (
           <div className="flex h-full items-center justify-center text-muted-foreground">
             <Loader2 className="mr-2 size-6 animate-spin" />
             Loading messages...
           </div>
-        ) : combinedMessages.length === 0 ? (
+        ) : !hasChatContent ? (
           <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
             <MessageSquare className="mb-4 size-12 opacity-20" />
             <h3 className="mb-1 text-lg font-medium">No messages yet</h3>
@@ -374,6 +397,7 @@ export default function ClientChatInterface({
               shouldScrollToBottom={shouldScrollToBottom}
               onScrollComplete={handleScrollComplete}
               onScrollStateChange={handleScrollStateChange} // Add this prop
+              isTyping={isTyping}
             />
             {dbError && !connectionFailed && (
               <div className="absolute bottom-4 left-4 rounded bg-red-100 px-3 py-1 text-xs text-red-800">
@@ -388,7 +412,6 @@ export default function ClientChatInterface({
       <div className="p-4">
         <ChatInput
           onSendMessage={handleSendMessage}
-          isLoading={sendingMessage}
           disabled={connectionFailed}
           placeholder={
             connectionFailed
