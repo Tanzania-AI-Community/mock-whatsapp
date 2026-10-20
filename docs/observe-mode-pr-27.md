@@ -15,11 +15,13 @@ Conflict resolutions:
 Validation:
 - Frozen dependency install passed.
 - All 51 tests passed, including observe API scope and send-block regressions.
-- Lint and TypeScript passed.
+- Lint and TypeScript passed. Lint retains two existing ChatContainer hook
+  dependency warnings.
 - Production build compiled with observe mode and dummy local service URLs.
   The packaging step initially failed because no public directory exists; the
   build script now copies that optional directory only when present.
-- Formatting checked; corrected the existing provider import formatting issue.
+- Formatting checked; corrected existing provider import formatting issues.
+- Full production build and asset packaging passed after the script fix.
 
 No database migration is included: the schema maps the existing external
 messages.user_id column. The connected database must already have that column.
