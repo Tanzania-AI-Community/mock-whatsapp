@@ -30,6 +30,7 @@ export const ChatContainer = ({
   const [showScrollButton, setShowScrollButton] = useState(false)
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true)
   const prevMessagesLengthRef = useRef(messages.length)
+  const isInitialMessagesRenderRef = useRef(true)
 
   console.log("Messages in container :", messages)
 
@@ -142,44 +143,16 @@ export const ChatContainer = ({
     }
   }
 
-  // Improved scroll event listener with debounce
-  useEffect(() => {
-    const currentContainer = containerRef.current
-    if (!currentContainer) return
-
-    let scrollTimeout: NodeJS.Timeout | null = null
-
-    const handleScrollDebounced = () => {
-      if (scrollTimeout) {
-        clearTimeout(scrollTimeout)
-      }
-
-      // Use a short debounce to avoid excessive checks
-      scrollTimeout = setTimeout(() => {
-        handleScroll()
-      }, 100)
-    }
-
-    currentContainer.addEventListener("scroll", handleScrollDebounced, {
-      passive: true,
-    })
-
-    return () => {
-      if (scrollTimeout) {
-        clearTimeout(scrollTimeout)
-      }
-      currentContainer.removeEventListener("scroll", handleScrollDebounced)
-    }
-  }, [])
-
   // Check for new messages and scroll accordingly
   useEffect(() => {
     if (messages.length === 0) return
 
     const hasNewMessages = messages.length > prevMessagesLengthRef.current
+    const isInitialMessagesRender = isInitialMessagesRenderRef.current
+    isInitialMessagesRenderRef.current = false
 
     // Always scroll on initial load or when explicitly requested
-    if (shouldScrollToBottom) {
+    if (isInitialMessagesRender || shouldScrollToBottom) {
       // Short delay to ensure component is fully rendered
       setTimeout(() => scrollToBottom(true), 100)
     }
@@ -203,22 +176,6 @@ export const ChatContainer = ({
     }
     wasTypingRef.current = isTyping
   }, [isTyping, isAutoScrollEnabled, scrollToBottom])
-
-  // Force a scroll position check when component mounts
-  useEffect(() => {
-    // Only run this effect if we have messages
-    if (messages.length === 0) return
-
-    // Initial scroll to bottom
-    scrollToBottom(false)
-
-    // Schedule a position check after everything has rendered
-    const checkTimer = setTimeout(() => {
-      handleScroll()
-    }, 500)
-
-    return () => clearTimeout(checkTimer)
-  }, [])
 
   // If no messages, render the empty state
   if (messages.length === 0 && !isTyping) {
@@ -256,7 +213,7 @@ export const ChatContainer = ({
         size="icon"
         variant="secondary"
         className={cn(
-          "absolute bottom-6 right-6 size-10 rounded-full shadow-md transition-all duration-200 ease-in-out",
+          "absolute right-6 bottom-6 size-10 rounded-full shadow-md transition-all duration-200 ease-in-out",
           showScrollButton
             ? "translate-y-0 opacity-100"
             : "pointer-events-none translate-y-4 opacity-0"

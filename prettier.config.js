@@ -29,6 +29,7 @@ const config = {
   importOrderMergeDuplicateImports: true,
   importOrderCombineTypeAndValueImports: true,
   tailwindAttributes: ["tw"],
+  tailwindStylesheet: "./app/globals.css",
   tailwindFunctions: ["cva"],
   plugins: [
     "@ianvs/prettier-plugin-sort-imports",

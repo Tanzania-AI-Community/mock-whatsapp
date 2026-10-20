@@ -1,5 +1,3 @@
-import React from "react"
-
 import { formatToolName } from "@/lib/utils"
 
 interface ToolTagProps {

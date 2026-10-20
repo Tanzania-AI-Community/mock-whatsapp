@@ -35,8 +35,10 @@ This project provides a sandbox environment that allows developers to:
 
 ### Prerequisites
 
-- Node.js 18+ and npm/pnpm
+- Node.js 22.13+ and pnpm 10.15.0 (the pinned package manager)
 - PostgreSQL database
+
+Tailwind CSS 4 requires Safari 16.4+, Chrome 111+, or Firefox 128+.
 
 ### Environment Setup
 

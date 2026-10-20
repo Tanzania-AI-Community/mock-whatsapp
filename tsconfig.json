@@ -7,17 +7,13 @@
     "module": "esnext",
     "skipLibCheck": true,
     "esModuleInterop": true,
-
-    /* Bundler mode */
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "incremental": true,
-
-    /* Linting */
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
@@ -35,7 +31,6 @@
     "next-env.d.ts",
     "next.config.js",
     "postcss.config.cjs",
-    ".eslintrc.cjs",
     "prettier.config.js",
     "**/*.ts",
     "**/*.tsx",
@@ -43,7 +38,8 @@
     "**/*.js",
     ".next/types/**/*.ts",
     "next.config.mjs",
-    "env.js"
+    "env.js",
+    ".next/dev/types/**/*.ts"
   ],
   "exclude": ["node_modules", ".next", "dist"]
 }
