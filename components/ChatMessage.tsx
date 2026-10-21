@@ -71,13 +71,13 @@ const ChatMessageComponent = ({ message }: ChatMessageProps) => {
 
     switch (message.status) {
       case "sending":
-        return <Check className="size-4 text-muted-foreground opacity-50" />
+        return <Check className="size-4 text-gray-500 opacity-50" />
       case "sent":
-        return <CheckCheck className="size-4 text-muted-foreground" />
+        return <CheckCheck className="size-4 text-gray-500" />
       case "error":
         return <Check className="size-4 text-destructive" />
       default:
-        return <Check className="size-4 text-muted-foreground" />
+        return <Check className="size-4 text-gray-500" />
     }
   }, [isSender, message.status])
 
@@ -103,15 +103,15 @@ const ChatMessageComponent = ({ message }: ChatMessageProps) => {
         <div
           className={`rounded-2xl px-4 py-2 ${
             isSender
-              ? "rounded-tr-sm bg-[#e7ffd9] text-foreground"
-              : "rounded-tl-sm bg-white text-foreground"
+              ? "rounded-tr-sm bg-[#e7ffd9] text-gray-900"
+              : "rounded-tl-sm bg-white text-gray-900"
           }`}
         >
           <div className="break-words text-[15px] leading-relaxed">
             {message.content && <FormattedText text={message.content} />}
           </div>
           <div className="-mb-1 flex items-center justify-end space-x-1">
-            <span className="text-xs text-muted-foreground">
+            <span className="text-xs text-gray-500">
               {format(messageTime, "HH:mm")}
             </span>
             {statusIcon}
