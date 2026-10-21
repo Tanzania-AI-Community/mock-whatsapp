@@ -17,12 +17,33 @@ function inboundRequest(body: unknown) {
 }
 
 describe("POST /api/inbound", () => {
+  const originalAppMode = process.env.APP_MODE
+
   beforeEach(() => {
+    process.env.APP_MODE = "chat"
     mock.method(console, "error", () => {})
   })
 
   afterEach(() => {
+    if (originalAppMode === undefined) delete process.env.APP_MODE
+    else process.env.APP_MODE = originalAppMode
     mock.restoreAll()
+  })
+
+  it("blocks forwarding in observe mode", async () => {
+    process.env.APP_MODE = "observe"
+    const fetchMock = mock.method(globalThis, "fetch", async () =>
+      Response.json({ status: "ok" })
+    )
+
+    const response = await POST(inboundRequest({ body: "Hello" }))
+
+    assert.equal(response.status, 403)
+    assert.deepEqual(await response.json(), {
+      success: false,
+      error: "OBSERVE_MODE_READ_ONLY",
+    })
+    assert.equal(fetchMock.mock.callCount(), 0)
   })
 
   it("forwards the message to the chatbot as a WhatsApp webhook", async () => {

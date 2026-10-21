@@ -1,8 +1,16 @@
 import { env } from "@/env.js"
 
+import { getAppMode } from "@/lib/appMode"
 import { buildTextMessageWebhook } from "@/lib/metaWebhook"
 
 export async function POST(request: Request) {
+  if (getAppMode() === "observe") {
+    return Response.json(
+      { success: false, error: "OBSERVE_MODE_READ_ONLY" },
+      { status: 403 }
+    )
+  }
+
   let input: { body?: unknown; recipientId?: unknown }
   try {
     input = await request.json()

@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import Link from "next/link"
 import {
   AlertCircle,
   Database,
@@ -28,11 +29,13 @@ import { ChatContainer } from "@/components/ChatContainer"
 import { ChatInput } from "@/components/ChatInput"
 
 // Route handlers avoid the client-side Server Action queue
-async function requestMessages(): Promise<{
+async function requestMessages(userId?: number): Promise<{
   messages: Message[]
   error?: string
 }> {
-  const response = await fetch("/api/messages", { cache: "no-store" })
+  const url =
+    userId === undefined ? "/api/messages" : `/api/messages?userId=${userId}`
+  const response = await fetch(url, { cache: "no-store" })
   return response.json()
 }
 
@@ -50,12 +53,17 @@ async function postInboundMessage(
 interface ClientChatInterfaceProps {
   initialMessages: Message[]
   isInitialLoading?: boolean
+  mode?: "chat" | "observe"
+  observedUserId?: number | null
 }
 
 export default function ClientChatInterface({
   initialMessages,
   isInitialLoading = false,
+  mode = "chat",
+  observedUserId = null,
 }: ClientChatInterfaceProps) {
+  const isReadOnly = mode === "observe"
   // Use initialMessages as the starting point for our state
   const [messages, setMessages] = useState<Message[]>(initialMessages)
   const [isLoading, setIsLoading] = useState(
@@ -85,7 +93,9 @@ export default function ClientChatInterface({
 
     try {
       setIsLoading(true)
-      const response = await requestMessages()
+      const response = await requestMessages(
+        isReadOnly && observedUserId !== null ? observedUserId : undefined
+      )
       if (requestId !== latestRequestIdRef.current) return
       setIsLoading(false)
 
@@ -217,6 +227,11 @@ export default function ClientChatInterface({
   }
 
   const handleSendMessage = (text: string) => {
+    if (isReadOnly) {
+      setDbError("Observe mode is read-only. Sending is disabled.")
+      return
+    }
+
     // If we have a connection error, prevent sending
     if (connectionFailed) {
       // Show a temporary error that sending is disabled
@@ -326,9 +341,19 @@ export default function ClientChatInterface({
           <div className="flex size-10 items-center justify-center rounded-full bg-muted">
             <span className="text-lg font-semibold text-primary">T</span>
           </div>
-          <h1 className="text-xl font-semibold text-primary-foreground">
-            Twiga
-          </h1>
+          <div className="flex flex-col">
+            <h1 className="text-xl font-semibold text-primary-foreground">
+              Twiga
+            </h1>
+            {isReadOnly && observedUserId !== null ? (
+              <div className="flex items-center gap-2 text-xs text-primary-foreground/80">
+                <span className="rounded-full bg-primary-foreground/15 px-2 py-0.5 uppercase tracking-[0.2em]">
+                  Observe
+                </span>
+                <span>User #{observedUserId}</span>
+              </div>
+            ) : null}
+          </div>
           {/* Database status indicator */}
           {connectionFailed ? (
             <div className="flex items-center rounded-full bg-red-500 px-2 py-0.5 text-xs text-white">
@@ -351,9 +376,16 @@ export default function ClientChatInterface({
               <RefreshCw className="mr-2 size-4" />
               Refresh
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleClearChat}>
-              Clear chat
-            </DropdownMenuItem>
+            {!isReadOnly ? (
+              <DropdownMenuItem onClick={handleClearChat}>
+                Clear chat
+              </DropdownMenuItem>
+            ) : null}
+            {isReadOnly ? (
+              <DropdownMenuItem asChild>
+                <Link href="/">Change observed user</Link>
+              </DropdownMenuItem>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -392,9 +424,13 @@ export default function ClientChatInterface({
         ) : !hasChatContent ? (
           <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
             <MessageSquare className="mb-4 size-12 opacity-20" />
-            <h3 className="mb-1 text-lg font-medium">No messages yet</h3>
+            <h3 className="mb-1 text-lg font-medium">
+              {isReadOnly ? "No conversation found" : "No messages yet"}
+            </h3>
             <p className="text-center text-sm">
-              Start a conversation by sending a message below
+              {isReadOnly && observedUserId !== null
+                ? `No visible user or assistant messages were found for user #${observedUserId}.`
+                : "Start a conversation by sending a message below"}
             </p>
           </div>
         ) : (
@@ -416,17 +452,24 @@ export default function ClientChatInterface({
       </div>
 
       {/* Input area */}
-      <div className="p-4">
-        <ChatInput
-          onSendMessage={handleSendMessage}
-          disabled={connectionFailed}
-          placeholder={
-            connectionFailed
-              ? "Database connection required to send messages"
-              : "Type a message..."
-          }
-        />
-      </div>
+      {isReadOnly ? (
+        <div className="border-t bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+          Observe mode is read-only. This view only loads conversation history
+          from the database.
+        </div>
+      ) : (
+        <div className="p-4">
+          <ChatInput
+            onSendMessage={handleSendMessage}
+            disabled={connectionFailed}
+            placeholder={
+              connectionFailed
+                ? "Database connection required to send messages"
+                : "Type a message..."
+            }
+          />
+        </div>
+      )}
     </div>
   )
 }

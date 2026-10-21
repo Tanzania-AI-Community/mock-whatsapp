@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm"
 import {
   boolean,
+  integer,
   pgTable,
   serial,
   text,
@@ -20,6 +21,7 @@ export type MessageRoleType = (typeof MessageRole)[keyof typeof MessageRole]
 // Messages table matching the SQLModel structure
 export const messages = pgTable("messages", {
   id: serial("id").primaryKey(),
+  user_id: integer("user_id"),
   role: varchar("role", { length: 20 }).notNull(),
   content: text("content"),
   tool_name: varchar("tool_name", { length: 255 }),

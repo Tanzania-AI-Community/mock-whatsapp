@@ -1,6 +1,11 @@
 import { db } from "@/db"
 
 import { type Message } from "@/types/chat"
+import {
+  buildMessagesFindManyOptions,
+  formatDbMessage,
+  type GetMessagesOptions,
+} from "@/lib/messageQuery"
 
 /**
  * Helper function to check if an error is a connection error
@@ -16,7 +21,7 @@ function isConnectionError(error: unknown): boolean {
   )
 }
 
-export async function getMessages(limit: number = 100): Promise<{
+export async function getMessages(options: GetMessagesOptions = {}): Promise<{
   messages: Message[]
   error?: string
 }> {
@@ -29,15 +34,9 @@ export async function getMessages(limit: number = 100): Promise<{
       }
     }
 
-    const dbMessages = await db.query.messages.findMany({
-      limit,
-      where: (messages, { and, eq, or }) =>
-        and(
-          eq(messages.is_present_in_conversation, true),
-          or(eq(messages.role, "user"), eq(messages.role, "assistant"))
-        ),
-      orderBy: (messages, { desc }) => [desc(messages.created_at)],
-    })
+    const dbMessages = await db.query.messages.findMany(
+      buildMessagesFindManyOptions(options)
+    )
 
     // Always return an array, even if empty
     if (!dbMessages) {
@@ -45,17 +44,7 @@ export async function getMessages(limit: number = 100): Promise<{
       return { messages: [] }
     }
 
-    const formattedMessages: Message[] = dbMessages.map((msg) => ({
-      id: msg.id ?? crypto.randomUUID(),
-      role: msg.role as Message["role"],
-      content: msg.content ?? "",
-      tool_name: msg.tool_name ?? null,
-      created_at: msg.created_at,
-      timestamp: msg.created_at
-        ? Math.floor(new Date(msg.created_at).getTime() / 1000)
-        : Math.floor(Date.now() / 1000),
-      status: "sent",
-    }))
+    const formattedMessages: Message[] = dbMessages.map(formatDbMessage)
 
     return { messages: formattedMessages }
   } catch (error) {
