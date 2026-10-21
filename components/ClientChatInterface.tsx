@@ -66,7 +66,9 @@ export default function ClientChatInterface({
   const isReadOnly = mode === "observe"
   // Use initialMessages as the starting point for our state
   const [messages, setMessages] = useState<Message[]>(initialMessages)
-  const [isLoading, setIsLoading] = useState(isInitialLoading)
+  const [isLoading, setIsLoading] = useState(
+    isInitialLoading || initialMessages.length === 0
+  )
   const [dbError, setDbError] = useState<string | null>(null)
   const [connectionFailed, setConnectionFailed] = useState(false)
   const [tempMessages, setTempMessages] = useState<Message[]>([])
@@ -160,8 +162,11 @@ export default function ClientChatInterface({
 
   // Set up polling
   useEffect(() => {
-    // Initial fetch on mount
-    fetchMessages()
+    // Start after the effect commits so loading state changes do not cascade
+    // synchronously from the effect itself.
+    const initialFetchTimeout = setTimeout(() => {
+      void fetchMessages()
+    }, 0)
 
     // Only set up polling if not suspended
     if (!isPollingSuspended) {
@@ -170,11 +175,13 @@ export default function ClientChatInterface({
       }, 2000)
 
       return () => {
+        clearTimeout(initialFetchTimeout)
         if (pollingIntervalRef.current) {
           clearInterval(pollingIntervalRef.current)
         }
       }
     } else {
+      clearTimeout(initialFetchTimeout)
       // Clean up any existing interval when suspended
       if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current)
@@ -327,7 +334,7 @@ export default function ClientChatInterface({
   const hasChatContent = combinedMessages.length > 0 || isTyping
 
   return (
-    <div className="mx-auto flex h-screen min-w-[500px] max-w-2xl flex-col rounded-lg bg-primary-foreground shadow-lg">
+    <div className="mx-auto flex h-screen max-w-2xl min-w-[500px] flex-col rounded-lg bg-primary-foreground shadow-lg">
       {/* Header section */}
       <div className="flex items-center justify-between bg-primary px-4 py-3">
         <div className="flex items-center space-x-3">
