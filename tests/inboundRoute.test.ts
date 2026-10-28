@@ -1,17 +1,21 @@
 import assert from "node:assert/strict"
+import { mkdtemp, rm } from "node:fs/promises"
+import os from "node:os"
+import path from "node:path"
 import { afterEach, beforeEach, describe, it, mock } from "node:test"
 
-const CHATBOT_CALLBACK_URL = "http://chatbot.test/devhooks"
+const CHATBOT_CALLBACK_URL = "http://127.0.0.1:8000/devhooks"
 
 // env.js validates these when the route module is first imported
 process.env.CHATBOT_CALLBACK_URL = CHATBOT_CALLBACK_URL
 process.env.DATABASE_URL = "postgresql://user:password@localhost:5432/test"
+process.env.MOCK_WHATSAPP_TOKEN = "test-local-token"
 const { POST } = await import("@/app/api/inbound/route")
 
 function inboundRequest(body: unknown) {
   return new Request("http://localhost/api/inbound", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Origin: "http://localhost" },
     body: typeof body === "string" ? body : JSON.stringify(body),
   })
 }
@@ -19,15 +23,22 @@ function inboundRequest(body: unknown) {
 describe("POST /api/inbound", () => {
   const originalAppMode = process.env.APP_MODE
 
-  beforeEach(() => {
+  beforeEach(async () => {
     process.env.APP_MODE = "chat"
+    process.env.MOCK_WHATSAPP_DATA_DIR = await mkdtemp(
+      path.join(os.tmpdir(), "mock-inbound-")
+    )
     mock.method(console, "error", () => {})
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     if (originalAppMode === undefined) delete process.env.APP_MODE
     else process.env.APP_MODE = originalAppMode
     mock.restoreAll()
+    await rm(process.env.MOCK_WHATSAPP_DATA_DIR!, {
+      recursive: true,
+      force: true,
+    })
   })
 
   it("blocks forwarding in observe mode", async () => {
@@ -54,10 +65,10 @@ describe("POST /api/inbound", () => {
     const response = await POST(inboundRequest({ body: "Hello Twiga" }))
 
     assert.equal(response.status, 200)
-    assert.deepEqual(await response.json(), {
-      success: true,
-      data: { status: "ok" },
-    })
+    const result = await response.json()
+    assert.equal(result.success, true)
+    assert.match(result.messageId, /^wamid\./)
+    assert.deepEqual(result.data, { status: "ok" })
 
     assert.equal(fetchMock.mock.callCount(), 1)
     const [url, init] = fetchMock.mock.calls[0]!.arguments as [
@@ -115,6 +126,16 @@ describe("POST /api/inbound", () => {
     assert.equal(missingBody.status, 400)
     assert.equal(blankBody.status, 400)
     assert.equal(invalidJson.status, 400)
+    assert.equal(fetchMock.mock.callCount(), 0)
+  })
+
+  it("blocks cross-origin requests before forwarding", async () => {
+    const fetchMock = mock.method(globalThis, "fetch", async () =>
+      Response.json({ status: "ok" })
+    )
+    const foreign = inboundRequest({ body: "hello" })
+    foreign.headers.set("origin", "http://example.com")
+    assert.equal((await POST(foreign)).status, 403)
     assert.equal(fetchMock.mock.callCount(), 0)
   })
 

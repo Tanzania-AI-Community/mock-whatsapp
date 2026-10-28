@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import {
   AlertCircle,
@@ -12,12 +12,10 @@ import {
 } from "lucide-react"
 
 import type { Message } from "@/types/chat"
-import {
-  excludeClearedMessages,
-  getLastMessageId,
-  reconcileTempMessages,
-  shouldTriggerScroll,
-} from "@/lib/messageUtils"
+import type { LocalEvent } from "@/types/events"
+import { projectChat, reconcileInbound } from "@/lib/localChat"
+import { shouldTriggerScroll } from "@/lib/messageUtils"
+import { DEFAULT_RECIPIENT_ID } from "@/lib/metaWebhook"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -39,13 +37,26 @@ async function requestMessages(userId?: number): Promise<{
   return response.json()
 }
 
+async function requestEvents(after: number): Promise<{
+  events?: LocalEvent[]
+  nextCursor: number
+  error?: string
+}> {
+  const response = await fetch(
+    `/api/events?recipientId=${DEFAULT_RECIPIENT_ID}&after=${after}`,
+    { cache: "no-store" }
+  )
+  return response.json()
+}
+
 async function postInboundMessage(
-  body: string
+  body: string,
+  messageId: string
 ): Promise<{ success: boolean; error?: string }> {
   const response = await fetch("/api/inbound", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ body }),
+    body: JSON.stringify({ body, messageId }),
   })
   return response.json()
 }
@@ -72,16 +83,17 @@ export default function ClientChatInterface({
   const [dbError, setDbError] = useState<string | null>(null)
   const [connectionFailed, setConnectionFailed] = useState(false)
   const [tempMessages, setTempMessages] = useState<Message[]>([])
-  const [pendingInboundCount, setPendingInboundCount] = useState(0)
+  const [events, setEvents] = useState<LocalEvent[]>([])
+  const [clearedThroughSeq, setClearedThroughSeq] = useState(0)
+  const [expiredTypingUntil, setExpiredTypingUntil] = useState(0)
   const [shouldScrollToBottom, setShouldScrollToBottom] = useState(true)
   const [isPollingSuspended, setIsPollingSuspended] = useState(false)
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const isFetchingRef = useRef(false)
   const latestRequestIdRef = useRef(0)
   // A ref, because the polling interval keeps its first render's closure
-  const clearedThroughIdRef = useRef<number | null>(null)
+  const eventCursorRef = useRef(0)
   const prevMessagesLengthRef = useRef(initialMessages.length)
-  const [userJustSentMessage, setUserJustSentMessage] = useState(false)
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true) // Add this state
 
   // Only the newest request's response is applied, so a forced refresh can't be
@@ -93,9 +105,16 @@ export default function ClientChatInterface({
 
     try {
       setIsLoading(true)
-      const response = await requestMessages(
-        isReadOnly && observedUserId !== null ? observedUserId : undefined
-      )
+      if (!isReadOnly) {
+        const response = await requestEvents(eventCursorRef.current)
+        if (requestId !== latestRequestIdRef.current) return
+        setIsLoading(false)
+        if (!response.events) throw new Error(response.error)
+        handleNewEvents(response.events, response.nextCursor)
+        return
+      }
+
+      const response = await requestMessages(observedUserId ?? undefined)
       if (requestId !== latestRequestIdRef.current) return
       setIsLoading(false)
 
@@ -111,6 +130,8 @@ export default function ClientChatInterface({
       if (requestId !== latestRequestIdRef.current) return
       console.error("Error in fetchMessages:", error)
       setDbError("Failed to fetch messages. Please try again.")
+      // Chat mode keeps polling, so it reconnects once the mock is back
+      if (!isReadOnly) setConnectionFailed(true)
       setIsLoading(false)
     } finally {
       if (requestId === latestRequestIdRef.current) {
@@ -133,29 +154,32 @@ export default function ClientChatInterface({
     }
   }
 
-  // Helper function to handle new messages
-  const handleNewMessages = (fetchedMessages: Message[]) => {
-    const newMessages = excludeClearedMessages(
-      fetchedMessages,
-      clearedThroughIdRef.current
-    )
-
-    setTempMessages((pending) => reconcileTempMessages(pending, newMessages))
-
+  // Helper function to handle new observed messages
+  const handleNewMessages = (newMessages: Message[]) => {
     const shouldScroll = shouldTriggerScroll(
       newMessages,
       prevMessagesLengthRef.current,
-      userJustSentMessage,
+      false,
       isAutoScrollEnabled
     )
 
     if (shouldScroll) {
       setShouldScrollToBottom(true)
-      setUserJustSentMessage(false)
     }
 
     prevMessagesLengthRef.current = newMessages.length
     setMessages(newMessages)
+    setDbError(null)
+    setConnectionFailed(false)
+  }
+
+  // Chat mode appends only the events after the cursor
+  const handleNewEvents = (newEvents: LocalEvent[], nextCursor: number) => {
+    eventCursorRef.current = nextCursor
+    setEvents((current) => [...current, ...newEvents])
+    setTempMessages((pending) =>
+      reconcileInbound(pending, projectChat(newEvents).messages)
+    )
     setDbError(null)
     setConnectionFailed(false)
   }
@@ -191,18 +215,19 @@ export default function ClientChatInterface({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPollingSuspended])
 
-  // When initial messages are updated from props
+  const chat = useMemo(
+    () => projectChat(events.filter((event) => event.seq > clearedThroughSeq)),
+    [events, clearedThroughSeq]
+  )
+
+  // Hides typing once Twiga's indicator would have expired
   useEffect(() => {
-    const visibleInitialMessages = excludeClearedMessages(
-      initialMessages,
-      clearedThroughIdRef.current
+    const timeout = setTimeout(
+      () => setExpiredTypingUntil(chat.typingUntil),
+      Math.max(chat.typingUntil - Date.now(), 0)
     )
-    if (visibleInitialMessages.length > 0 && messages.length === 0) {
-      setMessages(visibleInitialMessages)
-      prevMessagesLengthRef.current = visibleInitialMessages.length
-      setShouldScrollToBottom(true)
-    }
-  }, [initialMessages, messages.length])
+    return () => clearTimeout(timeout)
+  }, [chat.typingUntil])
 
   const handleRefresh = () => {
     // Re-enable polling if it was suspended
@@ -212,17 +237,9 @@ export default function ClientChatInterface({
     void fetchMessages({ force: true })
   }
 
-  // Hides the conversation locally only; the messages stay in Twiga's database
+  // Hides the conversation locally only; the event log and Twiga keep it
   const handleClearChat = () => {
-    const lastMessageId = getLastMessageId(messages)
-    if (lastMessageId !== null) {
-      clearedThroughIdRef.current = Math.max(
-        lastMessageId,
-        clearedThroughIdRef.current ?? lastMessageId
-      )
-    }
-    prevMessagesLengthRef.current = 0
-    setMessages([])
+    setClearedThroughSeq(eventCursorRef.current)
     setTempMessages([])
   }
 
@@ -232,81 +249,44 @@ export default function ClientChatInterface({
       return
     }
 
-    // If we have a connection error, prevent sending
-    if (connectionFailed) {
-      // Show a temporary error that sending is disabled
-      setDbError(
-        "Cannot send messages while disconnected from the database. Please restore connection and refresh."
-      )
-      setTimeout(() => {
-        setDbError(
-          "Database connection failed. Please check your database configuration."
-        )
-      }, 3000)
-      return
-    }
-
-    // Set flag that user just sent a message to ensure scroll
-    setUserJustSentMessage(true)
+    if (connectionFailed) return
 
     // Always scroll to bottom when sending a new message
     setShouldScrollToBottom(true)
 
+    // The event log reuses this id, so the logged copy replaces the temporary one
+    const messageId = `wamid.${crypto.randomUUID()}`
     const tempMessage: Message = {
-      id: `temp-${crypto.randomUUID()}`,
+      id: messageId,
       role: "user",
       content: text,
       created_at: new Date(),
       timestamp: Math.floor(Date.now() / 1000),
       status: "sending",
       isTemp: true,
-      sentAfterId:
-        getLastMessageId(messages) ?? clearedThroughIdRef.current ?? 0,
     }
 
     setTempMessages((prev) => [...prev, tempMessage])
-    setPendingInboundCount((count) => count + 1)
-    void postInboundMessage(text)
+    void postInboundMessage(text, messageId)
       .then((result) => {
         if (!result.success) {
           throw new Error(
             result.error ?? "Failed to send message to WhatsApp API"
           )
         }
-
-        setTempMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === tempMessage.id ? { ...msg, status: "sent" } : msg
-          )
-        )
-
-        setTimeout(() => {
-          setTempMessages((prev) =>
-            prev.filter((msg) => msg.id !== tempMessage.id)
-          )
-        }, 10000)
-
-        // Load the reply before the typing indicator hides
-        return fetchMessages({ force: true })
       })
       .catch((error) => {
         console.error("Error sending message:", error)
 
         setTempMessages((prev) =>
           prev.map((msg) =>
-            msg.id === tempMessage.id ? { ...msg, status: "error" } : msg
+            msg.id === messageId
+              ? { ...msg, status: "error", error: String(error.message) }
+              : msg
           )
         )
-
-        setTimeout(() => {
-          setTempMessages((prev) =>
-            prev.filter((msg) => msg.id !== tempMessage.id)
-          )
-        }, 5000)
       })
-      .finally(() => {
-        setPendingInboundCount((count) => count - 1)
-      })
+      .finally(() => fetchMessages({ force: true }))
   }
 
   const handleScrollComplete = () => {
@@ -325,13 +305,16 @@ export default function ClientChatInterface({
   }
 
   // Combine real and temporary messages for display, filtering out unwanted roles
+  const visibleMessages = isReadOnly ? messages : chat.messages
   const filteredMessages =
-    messages.length > 0 ? filterAllowedRoles(messages) : []
+    visibleMessages.length > 0 ? filterAllowedRoles(visibleMessages) : []
   const filteredTempMessages =
     tempMessages.length > 0 ? filterAllowedRoles(tempMessages) : []
   const combinedMessages = [...filteredMessages, ...filteredTempMessages]
-  const isTyping = pendingInboundCount > 0
+  const isTyping = !isReadOnly && chat.typingUntil > expiredTypingUntil
   const hasChatContent = combinedMessages.length > 0 || isTyping
+  const errorMessage =
+    dbError ?? (isReadOnly ? null : chat.errors.at(-1)?.error)
 
   return (
     <div className="mx-auto flex h-screen max-w-2xl min-w-[500px] flex-col rounded-lg bg-primary-foreground shadow-lg">
@@ -395,13 +378,23 @@ export default function ClientChatInterface({
         <div className="flex items-center justify-between gap-4 bg-red-50 px-6 py-3 text-sm text-red-800">
           <div className="flex items-center">
             <AlertCircle className="mr-2 size-5 text-red-600" />
-            <div>
-              <p className="font-medium">Database Connection Error</p>
-              <p className="text-xs">
-                Please check your database configuration and ensure PostgreSQL
-                is running.
-              </p>
-            </div>
+            {isReadOnly ? (
+              <div>
+                <p className="font-medium">Database Connection Error</p>
+                <p className="text-xs">
+                  Please check your database configuration and ensure PostgreSQL
+                  is running.
+                </p>
+              </div>
+            ) : (
+              <div>
+                <p className="font-medium">Mock WhatsApp Connection Error</p>
+                <p className="text-xs">
+                  Could not load the local event log. Check that the mock is
+                  running.
+                </p>
+              </div>
+            )}
           </div>
           <Button
             size="sm"
@@ -442,9 +435,12 @@ export default function ClientChatInterface({
               onScrollStateChange={handleScrollStateChange} // Add this prop
               isTyping={isTyping}
             />
-            {dbError && !connectionFailed && (
-              <div className="absolute bottom-4 left-4 rounded bg-red-100 px-3 py-1 text-xs text-red-800">
-                {dbError}
+            {errorMessage && !connectionFailed && (
+              <div
+                role="alert"
+                className="absolute bottom-4 left-4 rounded bg-red-100 px-3 py-1 text-xs text-red-800"
+              >
+                {errorMessage}
               </div>
             )}
           </>
@@ -464,7 +460,7 @@ export default function ClientChatInterface({
             disabled={connectionFailed}
             placeholder={
               connectionFailed
-                ? "Database connection required to send messages"
+                ? "Connection required to send messages"
                 : "Type a message..."
             }
           />

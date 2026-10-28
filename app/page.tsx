@@ -68,7 +68,8 @@ export default async function Home({ searchParams }: HomeProps) {
       : Array.isArray(rawObservedUserId)
         ? rawObservedUserId.some((value) => value.trim().length > 0)
         : false
-  const shouldFetchMessages = appMode === "chat" || observedUserId !== null
+  // Chat mode shows the local event log instead of the database
+  const shouldFetchMessages = observedUserId !== null
 
   const response = shouldFetchMessages
     ? await getMessages(

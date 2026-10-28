@@ -11,6 +11,10 @@ export function sortMessages(messages: Message[]): Message[] {
     if (a.isTemp && !b.isTemp) return 1
     if (!a.isTemp && b.isTemp) return -1
 
+    if (a.eventSeq !== undefined && b.eventSeq !== undefined) {
+      return a.eventSeq - b.eventSeq
+    }
+
     // Otherwise sort by timestamp
     const timestampA = getMessageTimestamp(a)
     const timestampB = getMessageTimestamp(b)
@@ -83,76 +87,4 @@ export function shouldTriggerScroll(
 ): boolean {
   const hasNewMessages = newMessages.length > prevLength
   return hasNewMessages && (isUserMessage || isAutoScrollEnabled)
-}
-
-export function getLastMessageId(messages: Message[]): number | null {
-  const ids = messages
-    .map((message) => message.id)
-    .filter((id): id is number => typeof id === "number")
-  return ids.length > 0 ? Math.max(...ids) : null
-}
-
-// Database ids only increase, so messages saved after clearing stay visible
-export function excludeClearedMessages(
-  messages: Message[],
-  clearedThroughId: number | null
-): Message[] {
-  if (clearedThroughId === null) return messages
-  return messages.filter(
-    (message) => typeof message.id !== "number" || message.id > clearedThroughId
-  )
-}
-
-const normalizeContent = (content: string | null) => (content ?? "").trim()
-
-// Each temporary message claims at most one saved copy: the oldest unclaimed user
-// message with the same text and an id above its sentAfterId
-export function reconcileTempMessages(
-  tempMessages: Message[],
-  savedMessages: Message[]
-): Message[] {
-  if (tempMessages.length === 0) return tempMessages
-
-  const candidates = savedMessages
-    .filter(
-      (message): message is Message & { id: number } =>
-        message.role === "user" && typeof message.id === "number"
-    )
-    .sort((a, b) => a.id - b.id)
-
-  const claimedIds = new Set<number>()
-  const lastClaimedIdByContent = new Map<string, number>()
-  const unmatched = tempMessages.filter((temp) => {
-    if (temp.status === "error") return true
-
-    const content = normalizeContent(temp.content)
-    const match = candidates.find(
-      (saved) =>
-        !claimedIds.has(saved.id) &&
-        saved.id > (temp.sentAfterId ?? 0) &&
-        normalizeContent(saved.content) === content
-    )
-    if (!match) return true
-
-    claimedIds.add(match.id)
-    lastClaimedIdByContent.set(
-      content,
-      Math.max(match.id, lastClaimedIdByContent.get(content) ?? 0)
-    )
-    return false
-  })
-
-  if (unmatched.length === tempMessages.length) return tempMessages
-
-  // Later polls return the claimed copies again, so identical messages still
-  // waiting may only match newer ones
-  return unmatched.map((temp) => {
-    const lastClaimedId = lastClaimedIdByContent.get(
-      normalizeContent(temp.content)
-    )
-    return lastClaimedId !== undefined &&
-      lastClaimedId > (temp.sentAfterId ?? 0)
-      ? { ...temp, sentAfterId: lastClaimedId }
-      : temp
-  })
 }
