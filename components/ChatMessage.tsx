@@ -17,7 +17,9 @@ const areEqual = (prevProps: ChatMessageProps, nextProps: ChatMessageProps) => {
     prevProps.message.id === nextProps.message.id &&
     prevProps.message.content === nextProps.message.content &&
     prevProps.message.status === nextProps.message.status &&
-    prevProps.message.isTemp === nextProps.message.isTemp
+    prevProps.message.isTemp === nextProps.message.isTemp &&
+    prevProps.message.read === nextProps.message.read &&
+    prevProps.message.error === nextProps.message.error
   )
 }
 
@@ -73,13 +75,17 @@ const ChatMessageComponent = ({ message }: ChatMessageProps) => {
       case "sending":
         return <Check className="size-4 text-gray-500 opacity-50" />
       case "sent":
-        return <CheckCheck className="size-4 text-gray-500" />
+        return message.read ? (
+          <CheckCheck aria-label="Read" className="size-4 text-blue-600" />
+        ) : (
+          <Check aria-label="Sent" className="size-4 text-gray-500" />
+        )
       case "error":
         return <Check className="size-4 text-destructive" />
       default:
         return <Check className="size-4 text-gray-500" />
     }
-  }, [isSender, message.status])
+  }, [isSender, message.status, message.read])
 
   // Early return for empty messages - don't render them at all.
   // This comes AFTER all hook calls to avoid the React Hook rule violation.
@@ -116,6 +122,11 @@ const ChatMessageComponent = ({ message }: ChatMessageProps) => {
             </span>
             {statusIcon}
           </div>
+          {message.error && (
+            <p role="alert" className="text-xs text-red-600">
+              {message.error}
+            </p>
+          )}
         </div>
       </div>
     </div>

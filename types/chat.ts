@@ -18,7 +18,9 @@ export interface Message {
   timestamp?: number
   status?: "sending" | "sent" | "error"
   isTemp?: boolean // Flag for temporary messages
-  sentAfterId?: number // Temporary messages: highest database id shown when sent
+  eventSeq?: number
+  read?: boolean
+  error?: string
 }
 
 // User state definitions from Python schema

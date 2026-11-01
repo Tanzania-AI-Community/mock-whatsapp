@@ -27,4 +27,23 @@ describe("ChatMessage", () => {
       assert.match(html, /text-gray-500/) // sent check mark
     }
   })
+
+  it("shows a read receipt only when one was received", () => {
+    const message = {
+      id: "wamid.1",
+      role: "user" as const,
+      content: "hello",
+      status: "sent" as const,
+    }
+    assert.doesNotMatch(
+      renderToStaticMarkup(<ChatMessage message={message} />),
+      /aria-label="Read"/
+    )
+    assert.match(
+      renderToStaticMarkup(
+        <ChatMessage message={{ ...message, read: true }} />
+      ),
+      /aria-label="Read"/
+    )
+  })
 })
