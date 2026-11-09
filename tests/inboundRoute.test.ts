@@ -1,8 +1,12 @@
 import assert from "node:assert/strict"
 import { mkdtemp, rm } from "node:fs/promises"
+import { createServer } from "node:http"
+import type { AddressInfo } from "node:net"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, it, mock } from "node:test"
+
+const nativeFetch = globalThis.fetch
 
 const CHATBOT_CALLBACK_URL = "http://127.0.0.1:8000/devhooks"
 
@@ -83,6 +87,47 @@ describe("POST /api/inbound", () => {
       payload.entry[0].changes[0].value.messages[0].text.body,
       "Hello Twiga"
     )
+  })
+
+  it("does not follow callback redirects to another host", async () => {
+    let escaped = 0
+    const destination = createServer((_req, res) => {
+      escaped++
+      res.end("{}")
+    })
+    const callback = createServer((_req, res) => {
+      res.writeHead(307, {
+        Location: `http://127.0.0.1:${(destination.address() as AddressInfo).port}/external`,
+      })
+      res.end()
+    })
+    await new Promise<void>((resolve) =>
+      destination.listen(0, "127.0.0.1", resolve)
+    )
+    await new Promise<void>((resolve) =>
+      callback.listen(0, "127.0.0.1", resolve)
+    )
+    mock.method(
+      globalThis,
+      "fetch",
+      (url: string | URL, init?: RequestInit) => {
+        assert.equal(String(url), CHATBOT_CALLBACK_URL)
+        return nativeFetch(
+          `http://127.0.0.1:${(callback.address() as AddressInfo).port}/devhooks`,
+          init
+        )
+      }
+    )
+    try {
+      const response = await POST(inboundRequest({ body: "local only" }))
+      assert.equal(escaped, 0)
+      assert.equal(response.status, 502)
+    } finally {
+      await Promise.all([
+        new Promise<void>((resolve) => callback.close(() => resolve())),
+        new Promise<void>((resolve) => destination.close(() => resolve())),
+      ])
+    }
   })
 
   it("reports an error when the chatbot responds with an error status", async () => {

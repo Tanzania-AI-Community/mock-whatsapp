@@ -1,12 +1,21 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
-import {
-  buildTextMessageWebhook,
-  DEFAULT_RECIPIENT_ID,
-} from "@/lib/metaWebhook"
+import { buildMessageWebhook, DEFAULT_RECIPIENT_ID } from "@/lib/metaWebhook"
 
-describe("buildTextMessageWebhook", () => {
+const buildTextMessageWebhook = ({
+  body,
+  recipientId,
+}: {
+  body: string
+  recipientId?: string
+}) =>
+  buildMessageWebhook({
+    message: { type: "text", text: { body } },
+    recipientId,
+  })
+
+describe("buildMessageWebhook", () => {
   it("builds a WhatsApp text message webhook", () => {
     const payload = buildTextMessageWebhook({ body: "Hello Twiga" })
 

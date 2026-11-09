@@ -31,13 +31,15 @@ export const ChatContainer = ({
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true)
   const prevMessagesLengthRef = useRef(messages.length)
   const isInitialMessagesRenderRef = useRef(true)
+  const lastScrollTopRef = useRef(0)
+  const isEmpty = messages.length === 0 && !isTyping
 
   console.log("Messages in container :", messages)
 
   // Filter out empty messages.
   const validMessages = useMemo(() => {
     return messages.filter((msg) => {
-      return msg.content && msg.content.trim() !== ""
+      return (msg.content && msg.content.trim() !== "") || msg.media
     })
   }, [messages])
 
@@ -132,6 +134,12 @@ export const ChatContainer = ({
     // Use a very small threshold (20px) for better precision
     const isAtBottom = distanceFromBottom <= 20
 
+    // Smooth scrolls to the bottom only move down, so only scrolling up
+    // stops following new messages
+    const scrolledUp = scrollTop < lastScrollTopRef.current
+    lastScrollTopRef.current = scrollTop
+    if (!isAtBottom && !scrolledUp) return
+
     // Only update states if they've actually changed
     if (showScrollButton === isAtBottom) {
       setShowScrollButton(!isAtBottom)
@@ -141,6 +149,17 @@ export const ChatContainer = ({
       setIsAutoScrollEnabled(isAtBottom)
       onScrollStateChange?.(isAtBottom)
     }
+  }
+
+  // A smooth scroll keeps running through wheel input, so stop it here
+  const handleWheel = (event: React.WheelEvent) => {
+    const container = containerRef.current
+    if (!container || event.deltaY >= 0 || !isAutoScrollEnabled) return
+    if (container.scrollHeight <= container.clientHeight) return
+    container.scrollTo({ top: container.scrollTop, behavior: "instant" })
+    setShowScrollButton(true)
+    setIsAutoScrollEnabled(false)
+    onScrollStateChange?.(false)
   }
 
   // Check for new messages and scroll accordingly
@@ -177,8 +196,22 @@ export const ChatContainer = ({
     wasTypingRef.current = isTyping
   }, [isTyping, isAutoScrollEnabled, scrollToBottom])
 
+  // Images, reply buttons and a shorter view can change the size after the
+  // scroll to the bottom has started; keep following the bottom while enabled
+  useEffect(() => {
+    const container = containerRef.current
+    const content = container?.firstElementChild
+    if (!container || !content || !isAutoScrollEnabled) return
+    const observer = new ResizeObserver(() => {
+      container.scrollTop = container.scrollHeight
+    })
+    observer.observe(container)
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [isEmpty, isAutoScrollEnabled])
+
   // If no messages, render the empty state
-  if (messages.length === 0 && !isTyping) {
+  if (isEmpty) {
     return null
   }
 
@@ -188,6 +221,7 @@ export const ChatContainer = ({
         className="h-full overflow-y-auto scroll-smooth bg-[#f0f2f5] px-4 py-2"
         ref={containerRef}
         onScroll={handleScroll} // Direct scroll handler for immediate response
+        onWheel={handleWheel}
       >
         <div className="flex flex-col space-y-4">
           {messageGroups.map((group) => (
