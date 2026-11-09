@@ -1,5 +1,31 @@
 import { type Message } from "@/types/chat"
-import { type LocalEvent } from "@/types/events"
+import { type LocalEvent, type OutgoingPayload } from "@/types/events"
+
+function outgoingMessage(payload: OutgoingPayload): Partial<Message> {
+  switch (payload.type) {
+    case "text":
+      return { content: payload.text.body }
+    case "image":
+      return {
+        content: payload.image.caption ?? "",
+        media: { kind: "image", id: payload.image.id },
+      }
+    case "document":
+      return {
+        content: payload.document.caption ?? "",
+        media: {
+          kind: "document",
+          id: payload.document.id,
+          filename: payload.document.filename,
+        },
+      }
+    case "interactive":
+      return {
+        content: payload.interactive.body.text,
+        interactive: payload.interactive,
+      }
+  }
+}
 
 export function projectChat(events: LocalEvent[]) {
   const messages = new Map<string, Message>()
@@ -15,6 +41,17 @@ export function projectChat(events: LocalEvent[]) {
           eventSeq: event.seq,
           timestamp: event.time / 1000,
           status: "sent",
+          ...(event.media
+            ? {
+                media: {
+                  kind: event.media.type,
+                  id: event.media.id,
+                  mimeType: event.media.mimeType,
+                  filename: event.media.filename,
+                },
+              }
+            : {}),
+          ...(event.reply ? { reply: event.reply } : {}),
         })
         break
       case "forwarded": {
@@ -30,10 +67,11 @@ export function projectChat(events: LocalEvent[]) {
         messages.set(event.messageId, {
           id: event.messageId,
           role: "assistant",
-          content: event.payload.text.body,
+          content: "",
           eventSeq: event.seq,
           timestamp: event.time / 1000,
           status: "sent",
+          ...outgoingMessage(event.payload),
         })
         typingUntil = 0
         break
@@ -43,6 +81,12 @@ export function projectChat(events: LocalEvent[]) {
         if (event.payload.typing_indicator) typingUntil = event.time + 25000
         break
       }
+      case "media_deleted":
+        for (const message of messages.values()) {
+          if (message.media?.id === event.mediaId)
+            message.media.serverCopyDeleted = true
+        }
+        break
       case "rejected":
         errors.push({ seq: event.seq, error: event.error })
         break

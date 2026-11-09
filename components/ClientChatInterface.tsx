@@ -13,6 +13,7 @@ import {
 
 import type { Message } from "@/types/chat"
 import type { LocalEvent } from "@/types/events"
+import { ChatActionsContext, type ChatActions } from "@/lib/chatActions"
 import { projectChat, reconcileInbound } from "@/lib/localChat"
 import { shouldTriggerScroll } from "@/lib/messageUtils"
 import { DEFAULT_RECIPIENT_ID } from "@/lib/metaWebhook"
@@ -25,6 +26,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { ChatContainer } from "@/components/ChatContainer"
 import { ChatInput } from "@/components/ChatInput"
+import { FlowDialog } from "@/components/FlowDialog"
 
 // Route handlers avoid the client-side Server Action queue
 async function requestMessages(userId?: number): Promise<{
@@ -49,15 +51,19 @@ async function requestEvents(after: number): Promise<{
   return response.json()
 }
 
-async function postInboundMessage(
-  body: string,
-  messageId: string
+async function postInbound(
+  body: Record<string, unknown> | FormData
 ): Promise<{ success: boolean; error?: string }> {
-  const response = await fetch("/api/inbound", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ body, messageId }),
-  })
+  const response = await fetch(
+    "/api/inbound",
+    body instanceof FormData
+      ? { method: "POST", body }
+      : {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+  )
   return response.json()
 }
 
@@ -95,6 +101,7 @@ export default function ClientChatInterface({
   const eventCursorRef = useRef(0)
   const prevMessagesLengthRef = useRef(initialMessages.length)
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true) // Add this state
+  const [openFlowId, setOpenFlowId] = useState<string | null>(null)
 
   // Only the newest request's response is applied, so a forced refresh can't be
   // overwritten by an older poll
@@ -243,7 +250,11 @@ export default function ClientChatInterface({
     setTempMessages([])
   }
 
-  const handleSendMessage = (text: string) => {
+  // Shows the user's message immediately, then posts it as a webhook
+  const sendInbound = (
+    preview: string,
+    body: (messageId: string) => Record<string, unknown> | FormData
+  ) => {
     if (isReadOnly) {
       setDbError("Observe mode is read-only. Sending is disabled.")
       return
@@ -259,7 +270,7 @@ export default function ClientChatInterface({
     const tempMessage: Message = {
       id: messageId,
       role: "user",
-      content: text,
+      content: preview,
       created_at: new Date(),
       timestamp: Math.floor(Date.now() / 1000),
       status: "sending",
@@ -267,7 +278,7 @@ export default function ClientChatInterface({
     }
 
     setTempMessages((prev) => [...prev, tempMessage])
-    void postInboundMessage(text, messageId)
+    void postInbound(body(messageId))
       .then((result) => {
         if (!result.success) {
           throw new Error(
@@ -287,6 +298,39 @@ export default function ClientChatInterface({
         )
       })
       .finally(() => fetchMessages({ force: true }))
+  }
+
+  const handleSendMessage = (text: string) =>
+    sendInbound(text, (messageId) => ({ body: text, messageId }))
+
+  const handleSendFile = (file: File, caption: string) =>
+    sendInbound(caption || `📎 ${file.name}`, (messageId) => {
+      const form = new FormData()
+      form.set("file", file)
+      form.set("messageId", messageId)
+      if (caption) form.set("caption", caption)
+      return form
+    })
+
+  const chatActions: ChatActions = {
+    reply: (contextId, type, optionId) => {
+      const sent = chat.messages.find((m) => m.id === contextId)?.interactive
+      const title =
+        sent?.type === "button"
+          ? sent.action.buttons.find((b) => b.reply.id === optionId)?.reply
+              .title
+          : sent?.type === "list"
+            ? sent.action.sections
+                .flatMap((section) => section.rows)
+                .find((row) => row.id === optionId)?.title
+            : undefined
+      sendInbound(title ?? optionId, (messageId) => ({
+        reply: { type, id: optionId },
+        contextId,
+        messageId,
+      }))
+    },
+    openFlow: setOpenFlowId,
   }
 
   const handleScrollComplete = () => {
@@ -313,11 +357,20 @@ export default function ClientChatInterface({
   const combinedMessages = [...filteredMessages, ...filteredTempMessages]
   const isTyping = !isReadOnly && chat.typingUntil > expiredTypingUntil
   const hasChatContent = combinedMessages.length > 0 || isTyping
+  // An error stays visible until the user sends another message
+  const lastError = chat.errors.at(-1)
+  const lastUserSeq = Math.max(
+    0,
+    ...chat.messages.map((m) => (m.role === "user" ? (m.eventSeq ?? 0) : 0))
+  )
   const errorMessage =
-    dbError ?? (isReadOnly ? null : chat.errors.at(-1)?.error)
+    dbError ??
+    (isReadOnly || !lastError || lastError.seq < lastUserSeq
+      ? null
+      : lastError.error)
 
   return (
-    <div className="mx-auto flex h-screen max-w-2xl min-w-[500px] flex-col rounded-lg bg-primary-foreground shadow-lg">
+    <div className="mx-auto flex h-screen max-w-2xl min-w-125 flex-col rounded-lg bg-primary-foreground shadow-lg">
       {/* Header section */}
       <div className="flex items-center justify-between bg-primary px-4 py-3">
         <div className="flex items-center space-x-3">
@@ -330,7 +383,7 @@ export default function ClientChatInterface({
             </h1>
             {isReadOnly && observedUserId !== null ? (
               <div className="flex items-center gap-2 text-xs text-primary-foreground/80">
-                <span className="rounded-full bg-primary-foreground/15 px-2 py-0.5 uppercase tracking-[0.2em]">
+                <span className="rounded-full bg-primary-foreground/15 px-2 py-0.5 tracking-[0.2em] uppercase">
                   Observe
                 </span>
                 <span>User #{observedUserId}</span>
@@ -428,24 +481,39 @@ export default function ClientChatInterface({
           </div>
         ) : (
           <>
-            <ChatContainer
-              messages={combinedMessages}
-              shouldScrollToBottom={shouldScrollToBottom}
-              onScrollComplete={handleScrollComplete}
-              onScrollStateChange={handleScrollStateChange} // Add this prop
-              isTyping={isTyping}
-            />
-            {errorMessage && !connectionFailed && (
-              <div
-                role="alert"
-                className="absolute bottom-4 left-4 rounded bg-red-100 px-3 py-1 text-xs text-red-800"
-              >
-                {errorMessage}
-              </div>
+            <ChatActionsContext.Provider
+              value={isReadOnly || connectionFailed ? null : chatActions}
+            >
+              <ChatContainer
+                messages={combinedMessages}
+                shouldScrollToBottom={shouldScrollToBottom}
+                onScrollComplete={handleScrollComplete}
+                onScrollStateChange={handleScrollStateChange} // Add this prop
+                isTyping={isTyping}
+              />
+            </ChatActionsContext.Provider>
+            {openFlowId && (
+              <FlowDialog
+                messageId={openFlowId}
+                onClose={(completed) => {
+                  setOpenFlowId(null)
+                  if (completed) void fetchMessages({ force: true })
+                }}
+              />
             )}
           </>
         )}
       </div>
+
+      {/* Below the chat, so it never covers messages or reply buttons */}
+      {hasChatContent && errorMessage && !connectionFailed && (
+        <div
+          role="alert"
+          className="mx-4 mt-2 self-start rounded bg-red-100 px-3 py-1 text-xs text-red-800"
+        >
+          {errorMessage}
+        </div>
+      )}
 
       {/* Input area */}
       {isReadOnly ? (
@@ -457,6 +525,7 @@ export default function ClientChatInterface({
         <div className="p-4">
           <ChatInput
             onSendMessage={handleSendMessage}
+            onSendFile={handleSendFile}
             disabled={connectionFailed}
             placeholder={
               connectionFailed

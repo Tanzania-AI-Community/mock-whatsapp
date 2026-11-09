@@ -1,3 +1,5 @@
+import type { InboundReply, Interactive } from "@/types/events"
+
 export type MessageRole = "user" | "assistant" | "tool" | "system"
 
 // New type for displayed message roles only
@@ -21,6 +23,15 @@ export interface Message {
   eventSeq?: number
   read?: boolean
   error?: string
+  media?: {
+    kind: "image" | "document" | "audio"
+    id: string
+    mimeType?: string
+    filename?: string
+    serverCopyDeleted?: boolean
+  }
+  interactive?: Interactive
+  reply?: InboundReply
 }
 
 // User state definitions from Python schema

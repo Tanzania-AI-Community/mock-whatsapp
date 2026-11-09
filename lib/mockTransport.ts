@@ -65,22 +65,168 @@ export function checkLocalRequest(request: Request, bearer = false) {
   return null
 }
 
+const chars = (value: string) => Array.from(value).length
+const text = (max: number) =>
+  z.string().refine((value) => value.trim().length > 0 && chars(value) <= max, {
+    message: `Must contain 1-${max} characters`,
+  })
+const recipient = z.string().regex(/^\d+$/)
+const mediaId = z.string().regex(/^\d+$/, "Use an uploaded media ID")
+const unique = (values: string[]) => new Set(values).size === values.length
+
 export const textPayloadSchema = z
   .object({
     messaging_product: z.literal("whatsapp"),
-    to: z.string().regex(/^\d+$/),
+    to: recipient,
     type: z.literal("text"),
-    text: z
-      .object({
-        body: z
-          .string()
-          .refine(
-            (body) => body.trim().length > 0 && Array.from(body).length <= 4096
-          ),
-      })
-      .passthrough(),
+    text: z.object({ body: text(4096) }).passthrough(),
   })
   .passthrough()
+
+// Twiga sends media by uploaded ID; links would make the mock fetch remote files
+export const imagePayloadSchema = z
+  .object({
+    messaging_product: z.literal("whatsapp"),
+    to: recipient,
+    type: z.literal("image"),
+    image: z.strictObject({ id: mediaId, caption: text(1024).optional() }),
+  })
+  .passthrough()
+
+export const documentPayloadSchema = z
+  .object({
+    messaging_product: z.literal("whatsapp"),
+    to: recipient,
+    type: z.literal("document"),
+    document: z.strictObject({
+      id: mediaId,
+      caption: text(1024).optional(),
+      filename: z
+        .string()
+        .regex(/^[^/\\]+\.[A-Za-z0-9]+$/, "Filename needs an extension")
+        .optional(),
+    }),
+  })
+  .passthrough()
+
+const textHeader = z.object({ type: z.literal("text"), text: text(60) })
+const footer = z.object({ text: text(60) })
+
+// Limits from Meta's interactive reply button and list message references
+const buttonSchema = z.object({
+  type: z.literal("button"),
+  header: textHeader.optional(),
+  body: z.object({ text: text(1024) }),
+  footer: footer.optional(),
+  action: z.object({
+    buttons: z
+      .array(
+        z.object({
+          type: z.literal("reply"),
+          reply: z.object({ id: text(256), title: text(20) }),
+        })
+      )
+      .min(1)
+      .max(3)
+      .refine((buttons) => unique(buttons.map((b) => b.reply.id)), {
+        message: "Button IDs must be unique",
+      })
+      .refine((buttons) => unique(buttons.map((b) => b.reply.title)), {
+        message: "Button titles must be unique",
+      }),
+  }),
+})
+
+const listSchema = z.object({
+  type: z.literal("list"),
+  header: textHeader.optional(),
+  body: z.object({ text: text(4096) }),
+  footer: footer.optional(),
+  action: z.object({
+    button: text(20),
+    sections: z
+      .array(
+        z.object({
+          title: text(24),
+          rows: z
+            .array(
+              z.object({
+                id: text(200),
+                title: text(24),
+                description: text(72)
+                  .nullish()
+                  .transform((value) => value ?? undefined),
+              })
+            )
+            .min(1),
+        })
+      )
+      .min(1)
+      .max(10)
+      .refine(
+        (sections) => sections.flatMap((section) => section.rows).length <= 10,
+        { message: "Lists support at most 10 rows" }
+      )
+      .refine(
+        (sections) =>
+          unique(sections.flatMap((section) => section.rows.map((r) => r.id))),
+        { message: "Row IDs must be unique" }
+      ),
+  }),
+})
+
+const flowSchema = z.object({
+  type: z.literal("flow"),
+  header: textHeader.optional(),
+  body: z.object({ text: z.string().min(1) }),
+  footer: z.object({ text: z.string() }).optional(),
+  action: z.object({
+    name: z.literal("flow"),
+    parameters: z
+      .object({
+        flow_message_version: z.literal("3"),
+        flow_token: z.string().min(1),
+        flow_id: z.string().min(1).optional(),
+        flow_name: z.string().min(1).optional(),
+        flow_cta: z.string().min(1),
+        flow_action: z.enum(["navigate", "data_exchange"]).optional(),
+        mode: z.enum(["draft", "published"]).optional(),
+        flow_action_payload: z
+          .object({
+            screen: z.string().min(1),
+            data: z.record(z.string(), z.unknown()).optional(),
+          })
+          .optional(),
+      })
+      .refine((p) => !p.flow_id !== !p.flow_name, {
+        message: "Use exactly one of flow_id or flow_name",
+      })
+      .refine(
+        (p) => p.flow_action === "data_exchange" || !!p.flow_action_payload,
+        { message: "Navigate flows need flow_action_payload" }
+      ),
+  }),
+})
+
+export const interactivePayloadSchema = z
+  .object({
+    messaging_product: z.literal("whatsapp"),
+    to: recipient,
+    type: z.literal("interactive"),
+    interactive: z.discriminatedUnion("type", [
+      buttonSchema,
+      listSchema,
+      flowSchema,
+    ]),
+  })
+  .passthrough()
+
+export const outgoingSchemas = {
+  text: textPayloadSchema,
+  image: imagePayloadSchema,
+  document: documentPayloadSchema,
+  interactive: interactivePayloadSchema,
+} as const
 
 export const readPayloadSchema = z
   .object({
@@ -91,11 +237,61 @@ export const readPayloadSchema = z
   })
   .passthrough()
 
+const errorTitles: Record<number, string> = {
+  100: "Invalid parameter",
+  131008: "Required parameter is missing",
+  131009: "Parameter value is not valid",
+  131053: "Media upload error",
+  131052: "Media download error",
+  131000: "Something went wrong",
+}
+
+// Same envelope as Graph API errors
+export function whatsappError(status: number, code: number, details: string) {
+  return Response.json(
+    {
+      error: {
+        message: `(#${code}) ${errorTitles[code] ?? "Error"}`,
+        type: "OAuthException",
+        code,
+        error_data: { messaging_product: "whatsapp", details },
+        fbtrace_id: `mock.${crypto.randomUUID()}`,
+      },
+    },
+    { status }
+  )
+}
+
+export function issueDetails(error: z.ZodError) {
+  return error.issues
+    .map((issue) => `${issue.path.join(".") || "payload"}: ${issue.message}`)
+    .join("; ")
+}
+
+export const faultTargets = [
+  "text",
+  "action",
+  "image",
+  "document",
+  "interactive",
+  "upload",
+  "delete",
+  "download",
+] as const
+
 export const faultSchema = z.object({
-  target: z.enum(["text", "action"]),
+  target: z.enum(faultTargets),
   recipientId: z.string().optional(),
   skip: z.number().int().min(0).default(0),
-  status: z.union([z.literal(429), z.literal(500)]).optional(),
+  status: z
+    .union([
+      z.literal(400),
+      z.literal(404),
+      z.literal(413),
+      z.literal(429),
+      z.literal(500),
+    ])
+    .optional(),
   delayMs: z.number().int().min(0).max(30000).default(0),
 })
 
@@ -106,7 +302,7 @@ export function setFault(fault: Fault | null) {
   state.whatsappFault = fault
 }
 
-export function takeFault(target: Fault["target"], recipientId: string) {
+export function takeFault(target: Fault["target"], recipientId?: string) {
   const fault = state.whatsappFault
   if (
     !fault ||
@@ -121,4 +317,19 @@ export function takeFault(target: Fault["target"], recipientId: string) {
   }
   state.whatsappFault = null
   return fault
+}
+
+// Applies a configured delay and returns the simulated rejection, if any
+export async function applyFault(
+  target: Fault["target"],
+  recipientId?: string
+) {
+  const fault = takeFault(target, recipientId)
+  if (fault?.delayMs)
+    await new Promise((resolve) => setTimeout(resolve, fault.delayMs))
+  if (!fault?.status) return null
+  return {
+    status: fault.status,
+    error: `Simulated WhatsApp ${target} rejection (${fault.status})`,
+  }
 }

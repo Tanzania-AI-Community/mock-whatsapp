@@ -42,6 +42,35 @@ describe("local WhatsApp receiver", () => {
     await rm(directory, { recursive: true, force: true })
   })
 
+  it("keeps unassigned upload failures out of every recipient chat", async () => {
+    await appendEvent({
+      kind: "rejected",
+      recipientId: "",
+      status: 413,
+      error: "Upload failed",
+    })
+    await appendEvent({
+      kind: "rejected",
+      recipientId,
+      status: 400,
+      error: "Send failed",
+    })
+    const response = await GET(
+      new Request(`http://localhost/api/events?recipientId=${recipientId}`)
+    )
+    const result = await response.json()
+    assert.deepEqual(
+      result.events.map((event: { error: string }) => event.error),
+      ["Send failed"]
+    )
+    assert.equal(result.nextCursor, 2)
+    const other = await GET(
+      new Request("http://localhost/api/events?recipientId=255700000000")
+    )
+    assert.deepEqual((await other.json()).events, [])
+    assert.equal((await readEvents()).length, 2)
+  })
+
   it("persists the actual text payload before acknowledging its message ID", async () => {
     const response = await POST(request(payload()))
     assert.equal(response.status, 200)
@@ -68,14 +97,18 @@ describe("local WhatsApp receiver", () => {
     assert.equal((await POST(malformed)).status, 400)
     assert.equal(
       (await POST(request({ ...payload(), type: "interactive" }))).status,
-      422
+      400
+    )
+    assert.equal(
+      (await POST(request({ ...payload(), type: "sticker" }))).status,
+      400
     )
     assert.equal(projectChat(await readEvents()).messages.length, 0)
   })
 
   it("rejects empty and over-limit text without recording delivery", async () => {
-    assert.equal((await POST(request(payload(" ")))).status, 422)
-    assert.equal((await POST(request(payload("x".repeat(4097))))).status, 422)
+    assert.equal((await POST(request(payload(" ")))).status, 400)
+    assert.equal((await POST(request(payload("x".repeat(4097))))).status, 400)
     assert.equal(projectChat(await readEvents()).messages.length, 0)
   })
 

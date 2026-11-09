@@ -5,6 +5,8 @@ import { Check, CheckCheck } from "lucide-react"
 import { type Message } from "@/types/chat"
 import { cn } from "@/lib/utils"
 import { FormattedText } from "@/components/FormattedText"
+import { InteractiveOptions } from "@/components/InteractiveOptions"
+import { MessageAttachment } from "@/components/MessageAttachment"
 
 interface ChatMessageProps {
   message: Message
@@ -19,7 +21,9 @@ const areEqual = (prevProps: ChatMessageProps, nextProps: ChatMessageProps) => {
     prevProps.message.status === nextProps.message.status &&
     prevProps.message.isTemp === nextProps.message.isTemp &&
     prevProps.message.read === nextProps.message.read &&
-    prevProps.message.error === nextProps.message.error
+    prevProps.message.error === nextProps.message.error &&
+    prevProps.message.media?.serverCopyDeleted ===
+      nextProps.message.media?.serverCopyDeleted
   )
 }
 
@@ -31,8 +35,10 @@ const ChatMessageComponent = ({ message }: ChatMessageProps) => {
   // State for fading animation
   const [_opacity, setOpacity] = useState(isTemporary ? 0 : 1)
 
-  // Check if the message content is empty or null
-  const isEmptyContent = !message.content || message.content.trim() === ""
+  // Media messages may have no caption
+  const isEmptyContent =
+    (!message.content || message.content.trim() === "") && !message.media
+  const interactive = message.interactive
 
   // Apply fade-in effect for temporary messages
   useEffect(() => {
@@ -95,7 +101,6 @@ const ChatMessageComponent = ({ message }: ChatMessageProps) => {
 
   return (
     <div
-      // eslint-disable-next-line tailwindcss/no-custom-classname
       className={cn(
         `message-appear flex flex-col space-y-1 ${isSender ? "items-end" : "items-start"}`,
         isTemporary && "animate-pulse",
@@ -113,9 +118,19 @@ const ChatMessageComponent = ({ message }: ChatMessageProps) => {
               : "rounded-tl-sm bg-white text-gray-900"
           }`}
         >
-          <div className="break-words text-[15px] leading-relaxed">
+          {message.media && <MessageAttachment media={message.media} />}
+          {interactive?.header && (
+            <p className="font-semibold">{interactive.header.text}</p>
+          )}
+          <div className="text-[15px] leading-relaxed wrap-break-word">
             {message.content && <FormattedText text={message.content} />}
           </div>
+          {interactive?.footer && (
+            <p className="text-xs text-gray-500">{interactive.footer.text}</p>
+          )}
+          {message.media?.serverCopyDeleted && (
+            <p className="text-xs text-gray-400">Media deleted from server</p>
+          )}
           <div className="-mb-1 flex items-center justify-end space-x-1">
             <span className="text-xs text-gray-500">
               {format(messageTime, "HH:mm")}
@@ -128,6 +143,12 @@ const ChatMessageComponent = ({ message }: ChatMessageProps) => {
             </p>
           )}
         </div>
+        {interactive && (
+          <InteractiveOptions
+            messageId={String(message.id)}
+            interactive={interactive}
+          />
+        )}
       </div>
     </div>
   )
